@@ -11,12 +11,16 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ==================== ЗАГЛУШКА ДЛЯ RENDER ====================
+# ==================== ИСПРАВЛЕННАЯ ЗАГЛУШКА ДЛЯ RENDER ====================
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is alive!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_server():
     port = int(os.environ.get("PORT", 10000))
