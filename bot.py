@@ -494,21 +494,16 @@ async def show_guilds_top(callback: types.CallbackQuery):
                 
                 total_guild_power = 0
                 for u_id, is_don in members:
-                    # Сумма всех карт в инвентаре участника
                     await cursor.execute("SELECT SUM(atk + def + hp + mana) FROM inventory WHERE user_id = ?", (u_id,))
                     cards_sum = (await cursor.fetchone())[0] or 0
                     
-                    # Книги баффов
                     await cursor.execute("SELECT extra_atk, extra_def, extra_mana FROM user_upgrades WHERE user_id = ?", (u_id,))
                     up = await cursor.fetchone()
                     books_bonus = (sum(up) * 10) if up else 0
                     
-                    # VIP бонус
                     vip_bonus = 150 if is_don else 0
-                    
                     total_guild_power += (cards_sum + books_bonus + vip_bonus)
                 
-                # Ранг Асты
                 asta_rank = "Обычный"
                 if b_defeated >= 100:
                     asta_rank = "🔥 SS Аста"
@@ -517,7 +512,6 @@ async def show_guilds_top(callback: types.CallbackQuery):
                 
                 guild_leaderboard.append((g_name, total_guild_power, len(members), b_defeated, asta_rank))
             
-            # Сортируем по суммарной силе участников
             guild_leaderboard.sort(key=lambda x: x[1], reverse=True)
 
     top_text = "🏆 **Рейтинг и Сила Гильдий** 🏆\n\n"
@@ -649,7 +643,7 @@ async def preview_bot_fight(callback: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ СРАЗИТЬСЯ С БОТОМ!", callback_data=f"exec_bot_{bot_rating}_{bot_name.replace(' ', '_')}"),
         [InlineKeyboardButton(text="◀️ Назад на арену", callback_data="action_arena")]
-    ]
+    ])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
