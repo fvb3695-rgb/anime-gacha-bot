@@ -9,7 +9,7 @@ import asyncio
 import aiosqlite
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
 # ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 class SimpleHandler(BaseHTTPRequestHandler):
@@ -212,7 +212,7 @@ def get_main_keyboard():
             InlineKeyboardButton(text="📚 Библиотека", callback_data="action_books_farm")
         ],
         [
-            InlineKeyboardButton(text="💎 Донат", callback_data="action_donate_shop"),
+            InlineKeyboardButton(text="⭐ Магазин Звезд (Донат)", callback_data="action_donate_shop"),
             InlineKeyboardButton(text="✏️ Сменить ник", callback_data="action_change_nick")
         ]
     ])
@@ -293,22 +293,101 @@ async def set_nickname_cmd(message: types.Message):
     await message.answer(f"✅ Ваш ник успешно изменен на: **{new_nick}**!", parse_mode="Markdown")
 
 
+# ==================== МАГАЗИН ЗВЕЗД (TELEGRAM STARS) ====================
+@dp.callback_query(F.data == "action_donate_shop")
+async def show_donate_shop(callback: types.CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⭐ Набор «Малый» (5 Звезд)", callback_data="pay_star_small")],
+        [InlineKeyboardButton(text="⭐ Набор «Большой» (15 Звезд)", callback_data="pay_star_large")],
+        [InlineKeyboardButton(text="📚 Набор книг (10 Звезд)", callback_data="pay_star_books")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
+    ])
+    text = (
+        "⭐ **Магазин Telegram Stars (Донат)**\n\n"
+        "Поддержите проект официальными Звездами Telegram (`⭐ XTR`).\n"
+        "• Покупка активирует статус **⭐ VIP-Донатер** (подсветка + бонус к урону по боссам).\n"
+        "• Нажмите на нужный пакет, чтобы получить инвойс на оплату."
+    )
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("pay_star_"))
+async def send_star_invoice(callback: types.CallbackQuery):
+    action = callback.data.replace("pay_star_", "")
+    
+    if action == "small":
+        title = "Набор «Малый» (+ крутки)"
+        description = "Пакет круток для призыва персонажей"
+        payload = "payload_rolls_5"
+        prices = [LabeledPrice(label="Звезды Telegram", amount=5)] # 5 Stars
+    elif action == "large":
+        title = "Набор «Большой» (+ премиум крутки)"
+        description = "Большой запас круток + VIP статус"
+        payload = "payload_rolls_15"
+        prices = [LabeledPrice(label="Звезды Telegram", amount=15)] # 15 Stars
+    elif action == "books":
+        title = "Набор книг мудрости"
+        description = "10 книг для прокачки баффов аккаунта"
+        payload = "payload_books_10"
+        prices = [LabeledPrice(label="Звезды Telegram", amount=10)] # 10 Stars
+    else:
+        await callback.answer("Ошибка пакета", show_alert=True)
+        return
+
+    await callback.message.answer_invoice(
+        title=title,
+        description=description,
+        prices=prices,
+        provider_token="",  # Пусто для цифровых товаров / Telegram Stars
+        currency="XTR",     # Официальная валюта Telegram Stars
+        payload=payload
+    )
+    await callback.answer()
+
+@dp.pre_checkout_query()
+async def pre_checkout_query_handler(pre_checkout_query: types.PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def successful_payment_handler(message: types.Message):
+    user_id = message.from_user.id
+    payload = message.successful_payment.invoice_payload
+    
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            # Активируем VIP статус донатера
+            await cursor.execute("UPDATE users SET is_donator = 1 WHERE user_id = ?", (user_id,))
+            
+            if payload == "payload_rolls_5":
+                await cursor.execute("UPDATE users SET rolls = rolls + 5 WHERE user_id = ?", (user_id,))
+                reward_text = "начислено +5 круток 🎫"
+            elif payload == "payload_rolls_15":
+                await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
+                reward_text = "начислено +15 круток 🎫"
+            elif payload == "payload_books_10":
+                await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
+                reward_text = "начислено +10 книг мудрости 📚"
+            else:
+                reward_text = "ресурсы зачислены!"
+                
+            await conn.commit()
+
+    await message.answer(f"🎉 **Оплата успешно прошла!** Статус ⭐ **VIP-Донатер** активирован, {reward_text}", parse_mode="Markdown")
+
+
 # ==================== ТОП ПО СИЛЕ ====================
 @dp.callback_query(F.data == "action_power_top")
 async def show_power_top(callback: types.CallbackQuery):
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            # Получаем всех пользователей
             await cursor.execute("SELECT user_id, nickname, is_donator FROM users")
             users = await cursor.fetchall()
 
             leaderboard = []
             for u_id, nick, is_donator in users:
-                # Считаем силу карт (сумма atk + def + hp + mana)
                 await cursor.execute("SELECT SUM(atk + def + hp + mana) FROM inventory WHERE user_id = ?", (u_id,))
                 cards_sum = (await cursor.fetchone())[0] or 0
 
-                # Считаем статы от книг/доната
                 await cursor.execute("SELECT extra_atk, extra_def, extra_mana FROM user_upgrades WHERE user_id = ?", (u_id,))
                 up = await cursor.fetchone()
                 up_sum = sum(up) if up else 0
@@ -316,7 +395,6 @@ async def show_power_top(callback: types.CallbackQuery):
                 total_power = cards_sum + (up_sum * 10)
                 leaderboard.append((nick, total_power, is_donator))
 
-            # Сортируем по убыванию силы
             leaderboard.sort(key=lambda x: x[1], reverse=True)
 
     top_text = "🏆 **Топ-10 Сильнейших Игроков** 🏆\n\n"
@@ -333,58 +411,16 @@ async def show_power_top(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ==================== ДОНАТ МАГАЗИН И VIP-СТАТУС ====================
-@dp.callback_query(F.data == "action_donate_shop")
-async def show_donate_shop(callback: types.CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎫 Пакет «Малый» (+5 круток)", callback_data="buy_donate_rolls_5")],
-        [InlineKeyboardButton(text="🎫 Пакет «Большой» (+15 круток)", callback_data="buy_donate_rolls_15")],
-        [InlineKeyboardButton(text="📚 Набор книг мудрости (+10 книг)", callback_data="buy_donate_books_10")],
-        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
-    ])
-    text = (
-        "💎 **Магазин Доната и VIP-статуса**\n\n"
-        "Покупка любого пакета навсегда активирует статус **⭐ VIP-Донатер** (подсветка в профиле, гильдиях, плюс бонус к урону по боссам)!\n\n"
-        "⚠️ *Демо-режим: в тестовой среде пополнение зачисляется мгновенно бесплатно.*"
-    )
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("buy_donate_"))
-async def process_donate_purchase(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    action = callback.data.replace("buy_donate_", "")
-    
-    async with aiosqlite.connect("gacha_bot.db") as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("UPDATE users SET is_donator = 1 WHERE user_id = ?", (user_id,))
-            
-            if action == "rolls_5":
-                await cursor.execute("UPDATE users SET rolls = rolls + 5 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! +5 круток и статус ⭐ VIP-Донатер!"
-            elif action == "rolls_15":
-                await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! +15 круток и статус ⭐ VIP-Донатер!"
-            elif action == "books_10":
-                await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! +10 книг и статус ⭐ VIP-Донатер!"
-            else:
-                msg = "✅ Покупка оформлена!"
-            await conn.commit()
-
-    await callback.answer(msg, show_alert=True)
-    await show_donate_shop(callback)
-
-
-# ==================== ПРОФИЛЬ И РЕФЕРАЛЫ ====================
+# ==================== ПРОФИЛЬ (БЕЗ ТОЧНОГО СЧЕТЧИКА КРУТОК) ====================
 @dp.callback_query(F.data == "action_profile")
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT nickname, rolls, books, rating, guild, referral_count, is_donator FROM users WHERE user_id = ?", (user_id,))
+            # Скрываем точное кол-во круток, заменяя на статус наличия
+            await cursor.execute("SELECT nickname, books, rating, guild, referral_count, is_donator, rolls FROM users WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
-            nick, rolls, books, rating, guild, ref_count, is_donator = row if row else ("Герой", 0, 0, 1000, 'Нет', 0, 0)
+            nick, books, rating, guild, ref_count, is_donator, rolls = row if row else ("Герой", 0, 1000, 'Нет', 0, 0, 0)
             
             await cursor.execute("SELECT COUNT(*) FROM inventory WHERE user_id = ?", (user_id,))
             inv_count = (await cursor.fetchone())[0]
@@ -394,11 +430,12 @@ async def show_profile(callback: types.CallbackQuery):
             atk, defs, mana = up if up else (0, 0, 0)
 
     vip_badge = " ⭐ [VIP-Донатер]" if is_donator else ""
+    rolls_status = "✨ Доступны для призыва" if rolls > 0 else "❌ Требуется пополнение"
 
     text = (
         f"👤 **Профиль: {nick}**{vip_badge}\n\n"
-        f"🎫 Крутки: `{rolls}`\n"
-        f"📚 Книги (баффы): `{books}`\n"
+        f"🎫 Статус круток: `{rolls_status}`\n"
+        f"📚 Книги баффов: `{books}` шт.\n"
         f"🏆 Рейтинг: `{rating}`\n"
         f"🏰 Гильдия: `{guild}`\n"
         f"📦 Карток в инвентаре: `{inv_count}`\n"
@@ -426,8 +463,7 @@ async def referral_menu(callback: types.CallbackQuery):
     text = (
         "🤝 **Реферальная программа**\n\n"
         "Зовите друзей и получайте крутки!\n"
-        "• За друга: +2 крутки 🎫\n"
-        "• Новому игроку: 5 круток + 5 книг 🎁\n\n"
+        "• За друга: бонусные крутки 🎫\n\n"
         f"👥 Приглашено друзей: `{ref_count}`\n\n"
         f"🔗 Ваша ссылка:\n`{ref_link}`"
     )
@@ -447,7 +483,7 @@ async def process_roll(callback: types.CallbackQuery):
             rolls = row[0] if row else 0
 
             if rolls < 1:
-                await callback.answer("❌ У вас закончились крутки! Посетите магазин доната или задания.", show_alert=True)
+                await callback.answer("❌ У вас закончились крутки! Поддержите проект в Магазине Звезд.", show_alert=True)
                 return
 
             await cursor.execute("UPDATE users SET rolls = rolls - 1 WHERE user_id = ?", (user_id,))
@@ -683,7 +719,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Заданий немного, бонусы сбалансированы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат-магазин!"
+        "Заданий немного, бонусы сбалансированы. Основные ресурсы получаются через рефералов или Магазин Звезд!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -974,7 +1010,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-if __name__ == "__main__":
-    asyncio.run(main())
     asyncio.run(main())
