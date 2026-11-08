@@ -160,7 +160,6 @@ async def init_db():
                 )
             """)
             
-            # Добавим колонку total_bosses_defeated в старые базы при обновлении
             try:
                 await cursor.execute("ALTER TABLE guilds ADD COLUMN total_bosses_defeated INTEGER DEFAULT 0")
             except Exception:
@@ -238,7 +237,7 @@ def get_main_keyboard():
         ],
         [
             InlineKeyboardButton(text="🏰 Гильдии", callback_data="action_guilds"),
-            InlineKeyboardButton(text="🏆 Топ по силе", callback_data="action_power_top")
+            InlineKeyboardButton(text="🏆 Топ гильдий", callback_data="action_guilds_top")
         ],
         [
             InlineKeyboardButton(text="🎯 Задания", callback_data="action_quests"),
@@ -480,6 +479,65 @@ async def show_profile(callback: types.CallbackQuery):
     await callback.answer()
 
 
+# ==================== ТОП ГИЛЬДИЙ ПО СУММАРНОЙ СИЛЕ ====================
+@dp.callback_query(F.data == "action_guilds_top")
+async def show_guilds_top(callback: types.CallbackQuery):
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT guild_name, total_bosses_defeated FROM guilds")
+            guilds = await cursor.fetchall()
+            
+            guild_leaderboard = []
+            for g_name, b_defeated in guilds:
+                await cursor.execute("SELECT user_id, is_donator FROM users WHERE guild = ?", (g_name,))
+                members = await cursor.fetchall()
+                
+                total_guild_power = 0
+                for u_id, is_don in members:
+                    # Сумма всех карт в инвентаре участника
+                    await cursor.execute("SELECT SUM(atk + def + hp + mana) FROM inventory WHERE user_id = ?", (u_id,))
+                    cards_sum = (await cursor.fetchone())[0] or 0
+                    
+                    # Книги баффов
+                    await cursor.execute("SELECT extra_atk, extra_def, extra_mana FROM user_upgrades WHERE user_id = ?", (u_id,))
+                    up = await cursor.fetchone()
+                    books_bonus = (sum(up) * 10) if up else 0
+                    
+                    # VIP бонус
+                    vip_bonus = 150 if is_don else 0
+                    
+                    total_guild_power += (cards_sum + books_bonus + vip_bonus)
+                
+                # Ранг Асты
+                asta_rank = "Обычный"
+                if b_defeated >= 100:
+                    asta_rank = "🔥 SS Аста"
+                elif b_defeated >= 50:
+                    asta_rank = "⭐ Аста"
+                
+                guild_leaderboard.append((g_name, total_guild_power, len(members), b_defeated, asta_rank))
+            
+            # Сортируем по суммарной силе участников
+            guild_leaderboard.sort(key=lambda x: x[1], reverse=True)
+
+    top_text = "🏆 **Рейтинг и Сила Гильдий** 🏆\n\n"
+    for idx, (g_name, power, members_count, b_defeated, asta) in enumerate(guild_leaderboard, 1):
+        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
+        top_text += (
+            f"{medal} **{g_name}**\n"
+            f"   ⚡ Суммарная сила: `{power}`\n"
+            f"   👥 Участников: `{members_count}` | 🐉 Боссов побеждено: `{b_defeated}`\n"
+            f"   🎁 Статус: [{asta}]\n\n"
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏰 Меню гильдий", callback_data="action_guilds")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
+    ])
+    await callback.message.edit_text(top_text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+
 # ==================== АРЕНА (ПРЕДБОЕВОЕ СРАВНЕНИЕ КОЛОД) ====================
 @dp.callback_query(F.data == "action_arena")
 async def show_arena(callback: types.CallbackQuery):
@@ -589,7 +647,7 @@ async def preview_bot_fight(callback: types.CallbackQuery):
         f"👇 *Нажмите кнопку ниже, чтобы начать схватку!*"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ СРАЗИТЬСЯ С БОТОМ!", callback_data=f"exec_bot_{bot_rating}_{bot_name.replace(' ', '_')}")],
+        [InlineKeyboardButton(text="⚔️ СРАЗИТЬСЯ С БОТОМ!", callback_data=f"exec_bot_{bot_rating}_{bot_name.replace(' ', '_')}"),
         [InlineKeyboardButton(text="◀️ Назад на арену", callback_data="action_arena")]
     ])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -855,7 +913,6 @@ async def show_guilds_menu(callback: types.CallbackQuery):
         is_leader = g_info and g_info[2] == user_id
         bosses_count = g_info[3] if g_info else 0
         
-        # Определение статуса Асты по количеству побед над боссами
         asta_status = "⚔️ Обычный состав"
         if bosses_count >= 100:
             asta_status = "🔥 **Аста (SS-Tier) [Чёрный клевер]** (Максимальный бонус!)"
@@ -883,6 +940,8 @@ async def show_guilds_menu(callback: types.CallbackQuery):
         for g_name, count, _, b_count in guilds:
             badge = " [SS Аста]" if b_count >= 100 else (" [Аста]" if b_count >= 50 else "")
             keyboard_builder.append([InlineKeyboardButton(text=f"🛡 {g_name} ({count} уч.){badge}", callback_data=f"join_guild_{g_name}")])
+            
+    keyboard_builder.append([InlineKeyboardButton(text="🏆 Топ гильдий по силе", callback_data="action_guilds_top")])
     keyboard_builder.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")])
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_builder), parse_mode="Markdown")
     await callback.answer()
@@ -1095,7 +1154,6 @@ async def process_hit_boss(callback: types.CallbackQuery):
             await cursor.execute("INSERT INTO guild_boss_hits (user_id, guild_name, hit_date) VALUES (?, ?, ?)", (user_id, guild_name, today_str))
             
             if new_hp == 0 or new_killers >= required_hits:
-                # Босс побежден: поднимаем уровень, увеличиваем счетчик побед гильдии и начисляем крутки
                 next_level = boss_level + 1
                 next_name, next_hp, _ = get_boss_info(next_level)
                 
@@ -1105,9 +1163,7 @@ async def process_hit_boss(callback: types.CallbackQuery):
                     WHERE guild_name = ?
                 """, (next_name, next_hp, next_hp, next_level, guild_name))
                 
-                # Увеличиваем счетчик побежденных боссов гильдии
                 await cursor.execute("UPDATE guilds SET total_bosses_defeated = total_bosses_defeated + 1 WHERE guild_name = ?", (guild_name,))
-                
                 await cursor.execute("UPDATE users SET rolls = rolls + 2 WHERE guild = ?", (guild_name,))
                 await conn.commit()
                 await callback.answer("🎉 Босс побежден! Новый босс призван, всем +2 крутки!", show_alert=True)
@@ -1138,7 +1194,7 @@ async def show_books_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
     ])
     text = f"📖 **Библиотека Баффов**\n\n📚 Доступно книг: `{books}` шт.\n\n📈 Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
-    await callback.message.edit_text(text, reply_markup=kb, parse_Mode="Markdown")
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, stat_name: str):
@@ -1171,9 +1227,6 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
