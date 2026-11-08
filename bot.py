@@ -929,7 +929,7 @@ async def referral_menu(callback: types.CallbackQuery):
     conn.close()
     
     ref_count = row[0] if row and row[0] is not None else 0
-    ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
+    ref_link = f"https://t.me/amy_anime_gacha_bot?start=ref{user_id}"
     
     text = (
         "🤝 Партнерская программа\n\n"
