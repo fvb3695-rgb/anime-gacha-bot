@@ -906,7 +906,7 @@ async def process_add_card_to_deck(callback: types.CallbackQuery):
     except Exception:
         pass
 # ==================== ПАРТНЕРСКАЯ ПРОГРАММА ====================
-@dp.callback_query(F.data == "action_referral")
+@router.callback_query(F.data == "action_referral")
 async def referral_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     bot_info = await bot.get_me()
