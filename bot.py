@@ -173,7 +173,6 @@ async def init_db():
                 )
             """)
             
-            # Заполняем дефолтные гильдии
             await cursor.execute("SELECT COUNT(*) FROM guilds")
             if (await cursor.fetchone())[0] == 0:
                 await cursor.executemany("INSERT INTO guilds (guild_name, members_count) VALUES (?, ?)", [
@@ -207,8 +206,11 @@ def get_main_keyboard():
             InlineKeyboardButton(text="🤝 Рефералы", callback_data="action_referral")
         ],
         [
-            InlineKeyboardButton(text="🎯 Задания / Фарм", callback_data="action_quests"),
-            InlineKeyboardButton(text="📚 Библиотека (Книги)", callback_data="action_books_farm")
+            InlineKeyboardButton(text="🎯 Задания", callback_data="action_quests"),
+            InlineKeyboardButton(text="📚 Библиотека", callback_data="action_books_farm")
+        ],
+        [
+            InlineKeyboardButton(text="💎 Донат и Ресурсы", callback_data="action_donate_shop")
         ]
     ])
 
@@ -236,7 +238,6 @@ async def cmd_start(message: types.Message):
                 if actual_inviter:
                     await cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (actual_inviter,))
                     if await cursor.fetchone():
-                        # Даем новичку 5 круток, а пригласившему +2 крутки за реферала[cite: 3]
                         await cursor.execute(
                             "INSERT INTO users (user_id, rolls, books, rating, guild, invited_by) VALUES (?, 5, 5, 1000, 'Нет', ?)",
                             (user_id, actual_inviter)
@@ -259,6 +260,47 @@ async def back_to_main_menu(callback: types.CallbackQuery):
     text = "🏠 **Главное меню:**"
     await callback.message.edit_text(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
     await callback.answer()
+
+
+# ==================== ДОНАТ МАГАЗИН (ПЛАШКА ДОНАТА) ====================
+@dp.callback_query(F.data == "action_donate_shop")
+async def show_donate_shop(callback: types.CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎫 Пакет «Малый» (+5 круток)", callback_data="buy_donate_rolls_5")],
+        [InlineKeyboardButton(text="🎫 Пакет «Большой» (+15 круток)", callback_data="buy_donate_rolls_15")],
+        [InlineKeyboardButton(text="📚 Набор книг мудрости (+10 книг)", callback_data="buy_donate_books_10")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
+    ])
+    text = (
+        "💎 **Магазин Доната и Ускорения**\n\n"
+        "Поддержите проект и мгновенно получите ресурсы для призывов или усиления баффов аккаунта!\n\n"
+        "⚠️ *Демо-режим: в тестовой среде пополнение зачисляется мгновенно бесплатно.*"
+    )
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("buy_donate_"))
+async def process_donate_purchase(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    action = callback.data.replace("buy_donate_", "")
+    
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            if action == "rolls_5":
+                await cursor.execute("UPDATE users SET rolls = rolls + 5 WHERE user_id = ?", (user_id,))
+                msg = "💎 Успешно! Вам начислено +5 круток 🎫"
+            elif action == "rolls_15":
+                await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
+                msg = "💎 Успешно! Вам начислено +15 круток 🎫"
+            elif action == "books_10":
+                await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
+                msg = "💎 Успешно! Вам начислено +10 книг мудрости 📚"
+            else:
+                msg = "✅ Покупка оформлена!"
+            await conn.commit()
+
+    await callback.answer(msg, show_alert=True)
+    await show_donate_shop(callback)
 
 
 # ==================== ПРОФИЛЬ И РЕФЕРАЛЫ ====================
@@ -327,7 +369,7 @@ async def process_roll(callback: types.CallbackQuery):
             rolls = row[0] if row else 0
 
             if rolls < 1:
-                await callback.answer("❌ У вас закончились крутки! Используйте задания или пополните баланс.", show_alert=True)
+                await callback.answer("❌ У вас закончились крутки! Посетите магазин доната или задания.", show_alert=True)
                 return
 
             await cursor.execute("UPDATE users SET rolls = rolls - 1 WHERE user_id = ?", (user_id,))
@@ -438,7 +480,7 @@ async def process_leave_guild(callback: types.CallbackQuery):
     await show_guilds_menu(callback)
 
 
-# ==================== ЦЕНТР ЗАДАНИЙ (МАКСИМУМ ПО 1-2 КРУТКИ, 1 КВЕСТ НА КНИГИ) ====================
+# ==================== ЦЕНТР ЗАДАНИЙ ====================
 @dp.callback_query(F.data == "action_quests")
 async def show_quests_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -476,7 +518,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Заданий немного, они дают небольшие бонусы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат!"
+        "Заданий немного, они дают небольшие бонусы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат-магазин!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -712,8 +754,8 @@ async def show_books_menu(callback: types.CallbackQuery):
 
     text = (
         "📖 **Библиотека и Донат-Баффы Аккаунта**\n\n"
-        "Используйте книги мудрости (полученные со старта, через донат или квесты) для перманентного усиления параметров вашего аккаунта.\n"
-        "⚙️ *Эти баффы полноценно учитываются в рейдах на боссов и на арене.*\n\n"
+        "Используйте книги мудрости (полученные со старта, через донат-магазин или квесты) для перманентного усиления параметров вашего аккаунта.\n"
+        "⚙️ *Эти баффы полноценно учитываются в рейдах на боссов.*\n\n"
         f"📚 Доступно книг: `{books}` шт.\n\n"
         f"📈 Ваши баффы: Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
     )
@@ -768,4 +810,5 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    asyncio.run(main())
     asyncio.run(main())
