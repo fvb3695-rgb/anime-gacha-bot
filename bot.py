@@ -37,7 +37,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 DEV_ID = 533162381
-DEV_USERNAME = "TokCiK"  # Твой ник в Telegram для гарантированной проверки
+DEV_USERNAME = "Alexander_alexeevich"  # Твой ник в Telegram для гарантированной проверки
 
 # Пулы персонажей с рангами S, A, B, C, D
 ICARDS_POOL = [
