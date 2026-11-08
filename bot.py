@@ -615,11 +615,6 @@ async def preview_player_fight(callback: types.CallbackQuery):
 SyntaxError: closing parenthesis ')' does not match opening parenthesis '[' on line 643[cite: 3]
 ```[cite: 3]
 
-В функции предбоевого экрана для бота (где создается клавиатура `kb = InlineKeyboardMarkup(...)`) в конце списка снова перепутаны закрывающие скобки. 
-
-Вот этот точный фрагмент функции `preview_bot_fight` (примерно 630–650 строки). Замени у себя в `bot.py` всю эту функцию целиком на этот рабочий вариант:
-
-```python
 # --- ПРЕДБОЕВОЙ ЭКРАН СРАВНЕНИЯ (БОТ) ---
 @dp.callback_query(F.data.startswith("preview_bot_"))
 async def preview_bot_fight(callback: types.CallbackQuery):
