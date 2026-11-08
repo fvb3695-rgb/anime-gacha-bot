@@ -612,9 +612,6 @@ async def preview_player_fight(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
-SyntaxError: closing parenthesis ')' does not match opening parenthesis '[' on line 643[cite: 3]
-```[cite: 3]
-
 # --- ПРЕДБОЕВОЙ ЭКРАН СРАВНЕНИЯ (БОТ) ---
 @dp.callback_query(F.data.startswith("preview_bot_"))
 async def preview_bot_fight(callback: types.CallbackQuery):
