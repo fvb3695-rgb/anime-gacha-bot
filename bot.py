@@ -36,8 +36,8 @@ TOKEN = "9049422974:AAG5svkRpLtL0-OXX6MikuEKNiJHHsEFoao"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Твой ID разработчика (если кнопка не появится, посмотри свой ID в профиле бота и впиши сюда точное число)
 DEV_ID = 533162381
+DEV_USERNAME = "TokCiK"  # Твой ник в Telegram для гарантированной проверки
 
 # Пулы персонажей с рангами S, A, B, C, D
 ICARDS_POOL = [
@@ -439,7 +439,7 @@ async def view_my_deck(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ==================== ПРОФИЛЬ (С ОТОБРАЖЕНИЕМ ТВОЕГО ID) ====================
+# ==================== ПРОФИЛЬ ====================
 @dp.callback_query(F.data == "action_profile")
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -463,7 +463,7 @@ async def show_profile(callback: types.CallbackQuery):
 
     text = (
         f"👤 **Профиль: {nick}**{vip_badge}\n"
-        f"🆔 Ваш Telegram ID: `{user_id}`\n\n"
+        f"🆔 ID: `{user_id}` | Username: `@{callback.from_user.username}`\n\n"
         f"🛡 **Колода:** заполнено слотов `{deck_count}/5`\n"
         f"🎫 Доступно круток: `{rolls}` шт.\n"
         f"📚 Книги баффов: `{books}` шт.\n"
@@ -1016,6 +1016,7 @@ async def process_kick_member(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "action_quests")
 async def show_quests_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    username = callback.from_user.username
     
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
@@ -1031,7 +1032,8 @@ async def show_quests_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text=f"🤝 Пригласи друга (+1 крутка) ({ref_count}/1)", callback_data="claim_q_invite")]
     ]
     
-    if user_id == DEV_ID:
+    # Проверка по ID ИЛИ по юзернейму TokCiK
+    if user_id == DEV_ID or (username and username.lower() == DEV_USERNAME.lower()):
         kb.append([InlineKeyboardButton(text="🛠 [DEV] Накинуть +5 книг и +5 круток", callback_data="dev_cheat_resources")])
         
     kb.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")])
@@ -1058,8 +1060,9 @@ async def process_claim_daily(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "dev_cheat_resources")
 async def process_dev_cheat(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    username = callback.from_user.username
     
-    if user_id != DEV_ID:
+    if user_id != DEV_ID and (not username or username.lower() != DEV_USERNAME.lower()):
         await callback.answer("❌ У вас нет прав!", show_alert=True)
         return
 
@@ -1070,6 +1073,23 @@ async def process_dev_cheat(callback: types.CallbackQuery):
             
     await callback.answer("🛠 DEV: Успешно начислено +5 круток и +5 книг мудрости!", show_alert=True)
     await show_quests_menu(callback)
+
+# Текстовая команда /dev для мгновенного начисления
+@dp.message(Command("dev"))
+async def cmd_dev_cheat(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    
+    if user_id != DEV_ID and (not username or username.lower() != DEV_USERNAME.lower()):
+        await message.answer("❌ У вас нет прав администратора.")
+        return
+
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE users SET rolls = rolls + 5, books = books + 5 WHERE user_id = ?", (user_id,))
+            await conn.commit()
+            
+    await message.answer("🛠 [DEV КОМАНДА] Успешно начислено +5 круток и +5 книг мудрости!")
 
 
 # ==================== СИСТЕМА ГИЛЬД-БОССОВ ====================
@@ -1171,7 +1191,7 @@ async def process_hit_boss(callback: types.CallbackQuery):
     await show_guild_boss_menu(callback)
 
 
-# ==================== БИБЛИОТЕКА И БАФФЫ (ИСПРАВЛЕНА ОШИБКА) ====================
+# ==================== БИБЛИОТЕКА И БАФФЫ ====================
 @dp.callback_query(F.data == "action_books_farm")
 async def show_books_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -1221,7 +1241,7 @@ async def handle_up_def(callback: types.CallbackQuery): await upgrade_user_stat(
 async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Bот запущен и готов к работе!")
+    logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
