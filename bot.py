@@ -87,17 +87,19 @@ async def init_db():
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
+                    nickname TEXT DEFAULT NULL,
                     rolls INTEGER DEFAULT 5,
                     books INTEGER DEFAULT 5,
                     rating INTEGER DEFAULT 1000,
                     guild TEXT DEFAULT 'Нет',
                     invited_by INTEGER DEFAULT NULL,
                     referral_count INTEGER DEFAULT 0,
-                    last_claim TEXT
+                    last_claim TEXT,
+                    is_donator INTEGER DEFAULT 0
                 )
             """)
             
-            for col, col_type in [("invited_by", "INTEGER"), ("referral_count", "INTEGER DEFAULT 0"), ("last_claim", "TEXT")]:
+            for col, col_type in [("is_donator", "INTEGER DEFAULT 0"), ("nickname", "TEXT DEFAULT NULL")]:
                 try:
                     await cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
                 except Exception:
@@ -203,19 +205,20 @@ def get_main_keyboard():
         ],
         [
             InlineKeyboardButton(text="🏰 Гильдии", callback_data="action_guilds"),
-            InlineKeyboardButton(text="🤝 Рефералы", callback_data="action_referral")
+            InlineKeyboardButton(text="🏆 Топ по силе", callback_data="action_power_top")
         ],
         [
             InlineKeyboardButton(text="🎯 Задания", callback_data="action_quests"),
             InlineKeyboardButton(text="📚 Библиотека", callback_data="action_books_farm")
         ],
         [
-            InlineKeyboardButton(text="💎 Донат и Ресурсы", callback_data="action_donate_shop")
+            InlineKeyboardButton(text="💎 Донат", callback_data="action_donate_shop"),
+            InlineKeyboardButton(text="✏️ Сменить ник", callback_data="action_change_nick")
         ]
     ])
 
 
-# ==================== СТАРТ И ГЛАВНОЕ МЕНЮ ====================
+# ==================== СТАРТ И НИКНЕЙМЫ ====================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -230,28 +233,29 @@ async def cmd_start(message: types.Message):
 
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT user_id, rolls FROM users WHERE user_id = ?", (user_id,))
+            await cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
             user = await cursor.fetchone()
 
             if not user:
+                default_nick = message.from_user.first_name or f"Герой_{user_id}"
                 actual_inviter = inviter_id if (inviter_id and inviter_id != user_id) else None
                 if actual_inviter:
                     await cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (actual_inviter,))
                     if await cursor.fetchone():
                         await cursor.execute(
-                            "INSERT INTO users (user_id, rolls, books, rating, guild, invited_by) VALUES (?, 5, 5, 1000, 'Нет', ?)",
-                            (user_id, actual_inviter)
+                            "INSERT INTO users (user_id, nickname, rolls, books, rating, guild, invited_by) VALUES (?, ?, 5, 5, 1000, 'Нет', ?)",
+                            (user_id, default_nick, actual_inviter)
                         )
                         await cursor.execute("UPDATE users SET referral_count = referral_count + 1, rolls = rolls + 2 WHERE user_id = ?", (actual_inviter,))
                     else:
-                        await cursor.execute("INSERT INTO users (user_id, rolls, books, rating, guild) VALUES (?, 5, 5, 1000, 'Нет')", (user_id,))
+                        await cursor.execute("INSERT INTO users (user_id, nickname, rolls, books, rating, guild) VALUES (?, ?, 5, 5, 1000, 'Нет')", (user_id, default_nick))
                 else:
-                    await cursor.execute("INSERT INTO users (user_id, rolls, books, rating, guild) VALUES (?, 5, 5, 1000, 'Нет')", (user_id,))
+                    await cursor.execute("INSERT INTO users (user_id, nickname, rolls, books, rating, guild) VALUES (?, ?, 5, 5, 1000, 'Нет')", (user_id, default_nick))
                 await conn.commit()
 
     text = (
         "✨ **Добро пожаловать в Аниме Гачу!** ✨\n\n"
-        "Собирайте редких персонажей, вступайте в гильдии, сражайтесь с боссами и прокачивайте свой отряд!"
+        "Собирайте персонажей, вступайте в гильдии, сражайтесь с боссами и поднимайтесь в Топе по силе!"
     )
     await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
@@ -261,8 +265,75 @@ async def back_to_main_menu(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
     await callback.answer()
 
+@dp.callback_query(F.data == "action_change_nick")
+async def ask_nickname(callback: types.CallbackQuery):
+    text = (
+        "✏️ **Смена никнейма**\n\n"
+        "Отправьте в чат команду вместе с вашим новым ником в таком формате:\n"
+        "`/setnick МоеИмя`"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="action_main_menu")]])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
 
-# ==================== ДОНАТ МАГАЗИН (ПЛАШКА ДОНАТА) ====================
+@dp.message(Command("setnick"))
+async def set_nickname_cmd(message: types.Message):
+    user_id = message.from_user.id
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("⚠️ Укажите ник после команды. Пример: `/setnick Саске`", parse_mode="Markdown")
+        return
+    
+    new_nick = parts[1].strip()[:20]
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE users SET nickname = ? WHERE user_id = ?", (new_nick, user_id))
+            await conn.commit()
+            
+    await message.answer(f"✅ Ваш ник успешно изменен на: **{new_nick}**!", parse_mode="Markdown")
+
+
+# ==================== ТОП ПО СИЛЕ ====================
+@dp.callback_query(F.data == "action_power_top")
+async def show_power_top(callback: types.CallbackQuery):
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            # Получаем всех пользователей
+            await cursor.execute("SELECT user_id, nickname, is_donator FROM users")
+            users = await cursor.fetchall()
+
+            leaderboard = []
+            for u_id, nick, is_donator in users:
+                # Считаем силу карт (сумма atk + def + hp + mana)
+                await cursor.execute("SELECT SUM(atk + def + hp + mana) FROM inventory WHERE user_id = ?", (u_id,))
+                cards_sum = (await cursor.fetchone())[0] or 0
+
+                # Считаем статы от книг/доната
+                await cursor.execute("SELECT extra_atk, extra_def, extra_mana FROM user_upgrades WHERE user_id = ?", (u_id,))
+                up = await cursor.fetchone()
+                up_sum = sum(up) if up else 0
+
+                total_power = cards_sum + (up_sum * 10)
+                leaderboard.append((nick, total_power, is_donator))
+
+            # Сортируем по убыванию силы
+            leaderboard.sort(key=lambda x: x[1], reverse=True)
+
+    top_text = "🏆 **Топ-10 Сильнейших Игроков** 🏆\n\n"
+    for idx, (nick, power, is_don) in enumerate(leaderboard[:10], 1):
+        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
+        vip = " ⭐" if is_don else ""
+        top_text += f"{medal} **{nick}**{vip} — `⚡ {power} силы`\n"
+
+    if not leaderboard:
+        top_text += "Список лидеров пока пуст."
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]])
+    await callback.message.edit_text(top_text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+
+# ==================== ДОНАТ МАГАЗИН И VIP-СТАТУС ====================
 @dp.callback_query(F.data == "action_donate_shop")
 async def show_donate_shop(callback: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -272,8 +343,8 @@ async def show_donate_shop(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
     ])
     text = (
-        "💎 **Магазин Доната и Ускорения**\n\n"
-        "Поддержите проект и мгновенно получите ресурсы для призывов или усиления баффов аккаунта!\n\n"
+        "💎 **Магазин Доната и VIP-статуса**\n\n"
+        "Покупка любого пакета навсегда активирует статус **⭐ VIP-Донатер** (подсветка в профиле, гильдиях, плюс бонус к урону по боссам)!\n\n"
         "⚠️ *Демо-режим: в тестовой среде пополнение зачисляется мгновенно бесплатно.*"
     )
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -286,15 +357,17 @@ async def process_donate_purchase(callback: types.CallbackQuery):
     
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE users SET is_donator = 1 WHERE user_id = ?", (user_id,))
+            
             if action == "rolls_5":
                 await cursor.execute("UPDATE users SET rolls = rolls + 5 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! Вам начислено +5 круток 🎫"
+                msg = "💎 Успешно! +5 круток и статус ⭐ VIP-Донатер!"
             elif action == "rolls_15":
                 await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! Вам начислено +15 круток 🎫"
+                msg = "💎 Успешно! +15 круток и статус ⭐ VIP-Донатер!"
             elif action == "books_10":
                 await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
-                msg = "💎 Успешно! Вам начислено +10 книг мудрости 📚"
+                msg = "💎 Успешно! +10 книг и статус ⭐ VIP-Донатер!"
             else:
                 msg = "✅ Покупка оформлена!"
             await conn.commit()
@@ -309,9 +382,9 @@ async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT rolls, books, rating, guild, referral_count FROM users WHERE user_id = ?", (user_id,))
+            await cursor.execute("SELECT nickname, rolls, books, rating, guild, referral_count, is_donator FROM users WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
-            rolls, books, rating, guild, ref_count = row if row else (0, 0, 1000, 'Нет', 0)
+            nick, rolls, books, rating, guild, ref_count, is_donator = row if row else ("Герой", 0, 0, 1000, 'Нет', 0, 0)
             
             await cursor.execute("SELECT COUNT(*) FROM inventory WHERE user_id = ?", (user_id,))
             inv_count = (await cursor.fetchone())[0]
@@ -320,17 +393,22 @@ async def show_profile(callback: types.CallbackQuery):
             up = await cursor.fetchone()
             atk, defs, mana = up if up else (0, 0, 0)
 
+    vip_badge = " ⭐ [VIP-Донатер]" if is_donator else ""
+
     text = (
-        f"👤 **Ваш профиль:**\n\n"
+        f"👤 **Профиль: {nick}**{vip_badge}\n\n"
         f"🎫 Крутки: `{rolls}`\n"
         f"📚 Книги (баффы): `{books}`\n"
         f"🏆 Рейтинг: `{rating}`\n"
         f"🏰 Гильдия: `{guild}`\n"
         f"📦 Карток в инвентаре: `{inv_count}`\n"
         f"👥 Приглашено друзей: `{ref_count}`\n\n"
-        f"📈 **Бонусы статов (Книги/Донат):** Атака +{atk} | Защита +{defs} | Мана +{mana}"
+        f"📈 **Бонусы статов:** Атака +{atk} | Защита +{defs} | Мана +{mana}"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="action_main_menu")]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Сменить ник", callback_data="action_change_nick")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="action_main_menu")]
+    ])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
@@ -410,7 +488,7 @@ async def process_roll(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ==================== СИСТЕМА ГИЛЬДИЙ (ВХОД / ВЫХОД) ====================
+# ==================== СИСТЕМА ГИЛЬДИЙ ====================
 @dp.callback_query(F.data == "action_guilds")
 async def show_guilds_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -420,18 +498,36 @@ async def show_guilds_menu(callback: types.CallbackQuery):
             user_row = await cursor.fetchone()
             user_guild = user_row[0] if user_row else 'Нет'
             
-            await cursor.execute("SELECT guild_name, members_count FROM guilds")
+            await cursor.execute("SELECT guild_name, members_count, leader_id FROM guilds")
             guilds = await cursor.fetchall()
 
     keyboard_builder = []
     if user_guild != 'Нет':
-        text = f"🏰 **Ваша гильдия:** `{user_guild}`\n\nДоступные функции:"
+        g_info = next((g for g in guilds if g[0] == user_guild), None)
+        is_leader = g_info and g_info[2] == user_id
+        
+        async with aiosqlite.connect("gacha_bot.db") as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT user_id, nickname, is_donator FROM users WHERE guild = ?", (user_guild,))
+                members = await cursor.fetchall()
+
+        members_text = "\n".join([f"• {'⭐ ' if m[2] else ''}{m[1]} {'(Лидер)' if m[0] == g_info[2] else ''}" for m in members])
+
+        text = (
+            f"🏰 **Ваша гильдия:** `{user_guild}`\n\n"
+            f"👥 **Состав участников:**\n{members_text}\n\n"
+            "Доступные функции:"
+        )
         keyboard_builder.append([InlineKeyboardButton(text="🐉 Гильд-босс (Рейд)", callback_data="action_guild_boss")])
+        
+        if is_leader and len(members) > 1:
+            keyboard_builder.append([InlineKeyboardButton(text="👢 Кикнуть игрока", callback_data="manage_kick_menu")])
+            
         keyboard_builder.append([InlineKeyboardButton(text="🚪 Покинуть гильдию", callback_data="leave_guild")])
     else:
         text = "🏰 **Список гильдий**\n\nВыберите гильдию для вступления:"
         if guilds:
-            for g_name, count in guilds:
+            for g_name, count, _ in guilds:
                 keyboard_builder.append([InlineKeyboardButton(text=f"🛡 {g_name} ({count} уч.)", callback_data=f"join_guild_{g_name}")])
 
     keyboard_builder.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")])
@@ -453,6 +549,11 @@ async def process_join_guild(callback: types.CallbackQuery):
                 await callback.answer(f"❌ Вы уже состоите в гильдии '{user_row[0]}'. Сначала покиньте её.", show_alert=True)
                 return
             
+            await cursor.execute("SELECT leader_id FROM guilds WHERE guild_name = ?", (guild_name,))
+            g_row = await cursor.fetchone()
+            if g_row and not g_row[0]:
+                await cursor.execute("UPDATE guilds SET leader_id = ? WHERE guild_name = ?", (user_id, guild_name))
+
             await cursor.execute("UPDATE users SET guild = ? WHERE user_id = ?", (guild_name, user_id))
             await cursor.execute("UPDATE guilds SET members_count = members_count + 1 WHERE guild_name = ?", (guild_name,))
             await conn.commit()
@@ -472,11 +573,75 @@ async def process_leave_guild(callback: types.CallbackQuery):
                 return
             
             old_guild = user_row[0]
+            
+            await cursor.execute("SELECT leader_id FROM guilds WHERE guild_name = ?", (old_guild,))
+            g_row = await cursor.fetchone()
+            is_leader = g_row and g_row[0] == user_id
+
             await cursor.execute("UPDATE users SET guild = 'Нет' WHERE user_id = ?", (user_id,))
             await cursor.execute("UPDATE guilds SET members_count = MAX(0, members_count - 1) WHERE guild_name = ?", (old_guild,))
+            
+            if is_leader:
+                await cursor.execute("SELECT user_id FROM users WHERE guild = ? LIMIT 1", (old_guild,))
+                next_member = await cursor.fetchone()
+                new_leader_id = next_member[0] if next_member else None
+                await cursor.execute("UPDATE guilds SET leader_id = ? WHERE guild_name = ?", (new_leader_id, old_guild))
+
             await conn.commit()
 
     await callback.answer(f"🚪 Вы покинули гильдию '{old_guild}'.", show_alert=True)
+    await show_guilds_menu(callback)
+
+@dp.callback_query(F.data == "manage_kick_menu")
+async def manage_kick_menu(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT guild FROM users WHERE user_id = ?", (user_id,))
+            u_row = await cursor.fetchone()
+            guild_name = u_row[0] if u_row else 'Нет'
+            
+            await cursor.execute("SELECT leader_id FROM guilds WHERE guild_name = ?", (guild_name,))
+            g_row = await cursor.fetchone()
+            if not g_row or g_row[0] != user_id:
+                await callback.answer("❌ Только лидер может кикать участников!", show_alert=True)
+                return
+
+            await cursor.execute("SELECT user_id, nickname FROM users WHERE guild = ? AND user_id != ?", (guild_name, user_id))
+            members = await cursor.fetchall()
+
+    kb = []
+    for m_id, m_nick in members:
+        kb.append([InlineKeyboardButton(text=f"👢 Кикнуть {m_nick}", callback_data=f"kick_member_{m_id}")])
+    kb.append([InlineKeyboardButton(text="◀️ Назад в гильдию", callback_data="action_guilds")])
+
+    text = "👢 **Управление участниками**\n\nВыберите игрока, которого хотите исключить из гильдии:"
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("kick_member_"))
+async def process_kick_member(callback: types.CallbackQuery):
+    admin_id = callback.from_user.id
+    target_id = int(callback.data.replace("kick_member_", ""))
+
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT guild FROM users WHERE user_id = ?", (admin_id,))
+            admin_guild = (await cursor.fetchone())[0]
+
+            await cursor.execute("SELECT guild, nickname FROM users WHERE user_id = ?", (target_id,))
+            target_row = await cursor.fetchone()
+
+            if not target_row or target_row[0] != admin_guild:
+                await callback.answer("❌ Игрок не найден в вашей гильдии.", show_alert=True)
+                return
+
+            target_nick = target_row[1]
+            await cursor.execute("UPDATE users SET guild = 'Нет' WHERE user_id = ?", (target_id,))
+            await cursor.execute("UPDATE guilds SET members_count = MAX(0, members_count - 1) WHERE guild_name = ?", (admin_guild,))
+            await conn.commit()
+
+    await callback.answer(f"✅ Игрок {target_nick} был исключен из гильдии.", show_alert=True)
     await show_guilds_menu(callback)
 
 
@@ -518,7 +683,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Заданий немного, они дают небольшие бонусы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат-магазин!"
+        "Заданий немного, бонусы сбалансированы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат-магазин!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -605,7 +770,7 @@ async def quest_books(callback: types.CallbackQuery):
     await show_quests_menu(callback)
 
 
-# ==================== СИСТЕМА ГИЛЬД-БОССОВ (УЧИТЫВАЕТ БОНУСЫ КНИГ/ДОНАТА) ====================
+# ==================== СИСТЕМА ГИЛЬД-БОССОВ ====================
 @dp.callback_query(F.data == "action_guild_boss")
 async def show_guild_boss_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -658,7 +823,7 @@ async def show_guild_boss_menu(callback: types.CallbackQuery):
         f"Здоровье: `{boss_hp}/{max_hp}` HP\n"
         f"[{bars}] {percent}%\n\n"
         f"👥 Участники: **{killers_count} / {required_hits}**\n\n"
-        "💡 *Урон по боссу рассчитывается с учетом ваших бонусных статов от книг/доната!*"
+        "💡 *Урон учитывает ваши баффы книг и VIP-бонус донатеров!*"
     )
     if is_defeated:
         text += "\n\n🎉 **Босс повержен! Нажмите удар, чтобы призвать следующего!**"
@@ -686,13 +851,15 @@ async def process_hit_boss(callback: types.CallbackQuery):
                 await callback.answer("⏳ Вы уже атаковали сегодня!", show_alert=True)
                 return
             
-            # Подтягиваем донат-баффы от книг для расчета урона
             await cursor.execute("SELECT extra_atk FROM user_upgrades WHERE user_id = ?", (user_id,))
             up = await cursor.fetchone()
             extra_atk = up[0] if up else 0
 
-            # Базовый урон + бонус от прокачанных книг/доната
-            damage = 15 + (extra_atk // 2)
+            await cursor.execute("SELECT is_donator FROM users WHERE user_id = ?", (user_id,))
+            d_row = await cursor.fetchone()
+            is_donator = d_row[0] if d_row else 0
+
+            damage = 15 + (extra_atk // 2) + (10 if is_donator else 0)
 
             await cursor.execute("SELECT boss_hp, killers_count, is_defeated, boss_level, max_hp FROM guild_boss WHERE guild_name = ?", (guild_name,))
             boss_row = await cursor.fetchone()
@@ -727,11 +894,11 @@ async def process_hit_boss(callback: types.CallbackQuery):
                 await cursor.execute("UPDATE guild_boss SET boss_hp = ?, killers_count = ? WHERE guild_name = ?", (new_hp, new_killers, guild_name))
                 await conn.commit()
 
-    await callback.answer(f"⚔️ Удар нанесен! (-{damage} HP с учетом баффов книг)", show_alert=True)
+    await callback.answer(f"⚔️ Удар нанесен! (-{damage} HP с учетом баффов и VIP)", show_alert=True)
     await show_guild_boss_menu(callback)
 
 
-# ==================== БИБЛИОТЕКА И ДОНАТ-БАФФЫ ЗА КНИГИ ====================
+# ==================== БИБЛИОТЕКА И БАФФЫ ====================
 @dp.callback_query(F.data == "action_books_farm")
 async def show_books_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -753,9 +920,8 @@ async def show_books_menu(callback: types.CallbackQuery):
     ])
 
     text = (
-        "📖 **Библиотека и Донат-Баффы Аккаунта**\n\n"
-        "Используйте книги мудрости (полученные со старта, через донат-магазин или квесты) для перманентного усиления параметров вашего аккаунта.\n"
-        "⚙️ *Эти баффы полноценно учитываются в рейдах на боссов.*\n\n"
+        "📖 **Библиотека и Баффы Аккаунта**\n\n"
+        "Используйте книги мудрости для перманентного усиления параметров вашего аккаунта.\n\n"
         f"📚 Доступно книг: `{books}` шт.\n\n"
         f"📈 Ваши баффы: Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
     )
@@ -775,7 +941,6 @@ async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, sta
                 await callback.answer(f"❌ Нужно минимум {cost} книги для улучшения!", show_alert=True)
                 return
 
-            # Списываем книги у игрока
             await cursor.execute("UPDATE users SET books = books - ? WHERE user_id = ?", (cost, user_id))
             
             await cursor.execute("SELECT 1 FROM user_upgrades WHERE user_id = ?", (user_id,))
@@ -804,11 +969,12 @@ async def handle_up_def(callback: types.CallbackQuery):
 # ==================== ЗАПУСК БОТА ====================
 async def main():
     await init_db()
-    # Сбрасываем зависшие соединения во избежание TelegramConflictError
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
     asyncio.run(main())
