@@ -802,6 +802,8 @@ async def handle_up_def(callback: types.CallbackQuery):
 # ==================== ЗАПУСК БОТА ====================
 async def main():
     await init_db()
+    # Сбрасываем старые зависшие сессии при каждом новом запуске
+    await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
 
