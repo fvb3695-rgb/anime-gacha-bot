@@ -99,7 +99,7 @@ async def init_db():
                 )
             """)
             
-            for col, col_type in [("is_donator", "INTEGER DEFAULT 0"), ("nickname", "TEXT DEFAULT NULL")]:
+            for col, col_type in [("is_donator", "INTEGER DEFAULT 0"), ("nickname", "TEXT DEFAULT NULL"), ("rolls", "INTEGER DEFAULT 5")]:
                 try:
                     await cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
                 except Exception:
@@ -319,17 +319,17 @@ async def send_star_invoice(callback: types.CallbackQuery):
         title = "Набор «Малый» (+ крутки)"
         description = "Пакет круток для призыва персонажей"
         payload = "payload_rolls_5"
-        prices = [LabeledPrice(label="Звезды Telegram", amount=5)] # 5 Stars
+        prices = [LabeledPrice(label="Звезды Telegram", amount=5)]
     elif action == "large":
         title = "Набор «Большой» (+ премиум крутки)"
         description = "Большой запас круток + VIP статус"
         payload = "payload_rolls_15"
-        prices = [LabeledPrice(label="Звезды Telegram", amount=15)] # 15 Stars
+        prices = [LabeledPrice(label="Звезды Telegram", amount=15)]
     elif action == "books":
         title = "Набор книг мудрости"
         description = "10 книг для прокачки баффов аккаунта"
         payload = "payload_books_10"
-        prices = [LabeledPrice(label="Звезды Telegram", amount=10)] # 10 Stars
+        prices = [LabeledPrice(label="Звезды Telegram", amount=10)]
     else:
         await callback.answer("Ошибка пакета", show_alert=True)
         return
@@ -338,8 +338,8 @@ async def send_star_invoice(callback: types.CallbackQuery):
         title=title,
         description=description,
         prices=prices,
-        provider_token="",  # Пусто для цифровых товаров / Telegram Stars
-        currency="XTR",     # Официальная валюта Telegram Stars
+        provider_token="",
+        currency="XTR",
         payload=payload
     )
     await callback.answer()
@@ -355,7 +355,6 @@ async def successful_payment_handler(message: types.Message):
     
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            # Активируем VIP статус донатера
             await cursor.execute("UPDATE users SET is_donator = 1 WHERE user_id = ?", (user_id,))
             
             if payload == "payload_rolls_5":
@@ -411,13 +410,12 @@ async def show_power_top(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ==================== ПРОФИЛЬ (БЕЗ ТОЧНОГО СЧЕТЧИКА КРУТОК) ====================
+# ==================== ПРОФИЛЬ ====================
 @dp.callback_query(F.data == "action_profile")
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            # Скрываем точное кол-во круток, заменяя на статус наличия
             await cursor.execute("SELECT nickname, books, rating, guild, referral_count, is_donator, rolls FROM users WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
             nick, books, rating, guild, ref_count, is_donator, rolls = row if row else ("Герой", 0, 1000, 'Нет', 0, 0, 0)
@@ -430,11 +428,10 @@ async def show_profile(callback: types.CallbackQuery):
             atk, defs, mana = up if up else (0, 0, 0)
 
     vip_badge = " ⭐ [VIP-Донатер]" if is_donator else ""
-    rolls_status = "✨ Доступны для призыва" if rolls > 0 else "❌ Требуется пополнение"
 
     text = (
         f"👤 **Профиль: {nick}**{vip_badge}\n\n"
-        f"🎫 Статус круток: `{rolls_status}`\n"
+        f"🎫 Доступно круток: `{rolls}` шт.\n"
         f"📚 Книги баффов: `{books}` шт.\n"
         f"🏆 Рейтинг: `{rating}`\n"
         f"🏰 Гильдия: `{guild}`\n"
@@ -719,7 +716,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Заданий немного, бонусы сбалансированы. Основные ресурсы получаются через рефералов или Магазин Звезд!"
+        "Заданий немного, бонусы сбалансированы. Основные ресурсы получаются через Магазин Звезд!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -999,7 +996,7 @@ async def handle_up_mana(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "upgrade_stat_def")
 async def handle_up_def(callback: types.CallbackQuery):
-    await upgrade_user_stat(callback, "extra_def", "Защита")
+    await upgrade_user_stat(callback, "upgrade_stat_def", "Защита")
 
 
 # ==================== ЗАПУСК БОТА ====================
