@@ -36,7 +36,7 @@ TOKEN = "9049422974:AAG5svkRpLtL0-OXX6MikuEKNiJHHsEFoao"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Твой ID разработчика для секретной кнопки
+# Твой ID разработчика (если кнопка не появится, посмотри свой ID в профиле бота и впиши сюда точное число)
 DEV_ID = 533162381
 
 # Пулы персонажей с рангами S, A, B, C, D
@@ -439,7 +439,7 @@ async def view_my_deck(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ==================== ПРОФИЛЬ ====================
+# ==================== ПРОФИЛЬ (С ОТОБРАЖЕНИЕМ ТВОЕГО ID) ====================
 @dp.callback_query(F.data == "action_profile")
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -462,7 +462,8 @@ async def show_profile(callback: types.CallbackQuery):
     vip_badge = " ⭐ [VIP-Донатер]" if is_donator else ""
 
     text = (
-        f"👤 **Профиль: {nick}**{vip_badge}\n\n"
+        f"👤 **Профиль: {nick}**{vip_badge}\n"
+        f"🆔 Ваш Telegram ID: `{user_id}`\n\n"
         f"🛡 **Колода:** заполнено слотов `{deck_count}/5`\n"
         f"🎫 Доступно круток: `{rolls}` шт.\n"
         f"📚 Книги баффов: `{books}` шт.\n"
@@ -826,7 +827,7 @@ async def successful_payment_handler(message: types.Message):
                 await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
                 r_text = "+15 круток 🎫"
             elif payload == "payload_books_10":
-                await cursor.execute("UPDATE users `SET books` = books + 10 WHERE user_id = ?", (user_id,))
+                await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
                 r_text = "+10 книг 📚"
             await conn.commit()
     await message.answer(f"🎉 **Оплата прошла успешно!** Статус ⭐ **VIP-Донатер** активирован, {r_text}", parse_mode="Markdown")
@@ -1011,7 +1012,7 @@ async def process_kick_member(callback: types.CallbackQuery):
     await show_guilds_menu(callback)
 
 
-# ==================== ЦЕНТР ЗАДАНИЙ (3 КРУТКИ + КНОПКА РАЗРАБА) ====================
+# ==================== ЦЕНТР ЗАДАНИЙ (ЕЖЕДНЕВНАЯ НАГРАДА + КНОПКА РАЗРАБА) ====================
 @dp.callback_query(F.data == "action_quests")
 async def show_quests_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -1023,7 +1024,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
             ref_count, last_claim_str = u_row[0] if u_row else 0, u_row[1] if u_row else None
             can_claim_daily = not last_claim_str or (datetime.now() - datetime.fromisoformat(last_claim_str) >= timedelta(hours=24))
 
-    daily_status = "🎁 Получить (+3 крутки)" if can_claim_daily else "⏳ Через 24ч"
+    daily_status = "🎁 Получить (+2 книги)" if can_claim_daily else "⏳ Через 24ч"
     
     kb = [
         [InlineKeyboardButton(text=f"📅 Ежедневный вход: {daily_status}", callback_data="claim_daily")],
@@ -1035,7 +1036,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
         
     kb.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")])
 
-    await callback.message.edit_text("🎯 **Центр Заданий и Наград**\n\nЗа ежедневный вход дается **3 крутки**!", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
+    await callback.message.edit_text("🎯 **Центр Заданий и Наград**\n\nЗа ежедневный вход дается **2 книги баффов**!", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data == "claim_daily")
@@ -1049,9 +1050,9 @@ async def process_claim_daily(callback: types.CallbackQuery):
             if row and row[0] and now - datetime.fromisoformat(row[0]) < timedelta(hours=24):
                 await callback.answer("⏳ Награда еще не доступна!", show_alert=True)
                 return
-            await cursor.execute("UPDATE users SET rolls = rolls + 3, last_claim = ? WHERE user_id = ?", (now.isoformat(), user_id))
+            await cursor.execute("UPDATE users SET books = books + 2, last_claim = ? WHERE user_id = ?", (now.isoformat(), user_id))
             await conn.commit()
-    await callback.answer("🎁 Получено +3 крутки за ежедневный вход!", show_alert=True)
+    await callback.answer("🎁 Получено +2 книги баффов за ежедневный вход!", show_alert=True)
     await show_quests_menu(callback)
 
 @dp.callback_query(F.data == "dev_cheat_resources")
@@ -1170,7 +1171,7 @@ async def process_hit_boss(callback: types.CallbackQuery):
     await show_guild_boss_menu(callback)
 
 
-# ==================== БИБЛИОТЕКА И БАФФЫ ====================
+# ==================== БИБЛИОТЕКА И БАФФЫ (ИСПРАВЛЕНА ОШИБКА) ====================
 @dp.callback_query(F.data == "action_books_farm")
 async def show_books_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -1189,7 +1190,7 @@ async def show_books_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
     ])
     text = f"📖 **Библиотека Баффов**\n\n📚 Доступно книг: `{books}` шт.\n\n📈 Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
-    await callback.message.edit_text(text, reply_kb=kb, parse_mode="Markdown") # заменено reply_kb на reply_markup ниже
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, stat_name: str):
@@ -1213,18 +1214,15 @@ async def handle_up_atk(callback: types.CallbackQuery): await upgrade_user_stat(
 @dp.callback_query(F.data == "upgrade_stat_mana")
 async def handle_up_mana(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_mana", "Мана")
 @dp.callback_query(F.data == "upgrade_stat_def")
-async def handle_up_def(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_defs", "Защита")
+async def handle_up_def(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_def", "Защита")
 
 
 # ==================== ЗАПУСК БОТА ====================
 async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Бот запущен и готов к работе!")
+    logging.info("Bот запущен и готов к работе!")
     await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
