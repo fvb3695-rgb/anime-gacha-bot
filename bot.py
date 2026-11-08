@@ -131,7 +131,7 @@ def init_db():
     conn = sqlite3.connect("gacha_bot.db")
     cursor = conn.cursor()
     
-   cursor.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             rolls INTEGER DEFAULT 5,
