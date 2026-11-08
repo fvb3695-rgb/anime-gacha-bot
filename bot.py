@@ -937,7 +937,8 @@ async def referral_menu(callback: types.CallbackQuery):
         f"• За каждого друга: **+2 крутки** 🎫\n"
         f"• Друг тоже получает бонус: **+7 круток** 🎁\n\n"
         f"👥 Приглашено друзей: **{ref_count}**\n\n"
-        f"🔗 Ваша реферальная ссылка:\n`{ref_link}`"
+        f"🔗 Ваша реферальная ссылка:\n"
+        f"{ref_link}"
     )
     
     await callback.message.edit_text(text, parse_mode="Markdown")
