@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ==================== ИСПРАВЛЕННАЯ ЗАГЛУШКА ДЛЯ RENDER ====================
+# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -27,7 +27,6 @@ def run_server():
     server = HTTPServer(("0.0.0.0", port), SimpleHandler)
     server.serve_forever()
 
-# Запускаем сервер параллельно с ботом для поддержания активности на Render
 threading.Thread(target=run_server, daemon=True).start()
 
 # ==================== НАСТРОЙКИ И ИНИЦИАЛИЗАЦИЯ ====================
@@ -104,7 +103,6 @@ async def init_db():
                 except Exception:
                     pass
             
-            # Инвентарь хранит ВСЕХ персонажей игрока навсегда
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS inventory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,14 +114,6 @@ async def init_db():
                     def INTEGER,
                     hp INTEGER,
                     mana INTEGER
-                )
-            """)
-            
-            # PvP колода хранит только ссылки (ID) на карты из инвентаря
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pvp_deck (
-                    user_id INTEGER,
-                    card_id INTEGER
                 )
             """)
             
@@ -141,7 +131,7 @@ async def init_db():
                 CREATE TABLE IF NOT EXISTS guilds (
                     guild_name TEXT PRIMARY KEY,
                     leader_id INTEGER,
-                    members_count INTEGER DEFAULT 1
+                    members_count INTEGER DEFAULT 0
                 )
             """)
 
@@ -183,13 +173,13 @@ async def init_db():
                 )
             """)
             
-            # Создаем стандартные гильдии для теста, если их нет
+            # Заполняем дефолтные гильдии
             await cursor.execute("SELECT COUNT(*) FROM guilds")
             if (await cursor.fetchone())[0] == 0:
                 await cursor.executemany("INSERT INTO guilds (guild_name, members_count) VALUES (?, ?)", [
-                    ("Акацуки", 1),
-                    ("Убийцы Драконов", 1),
-                    ("Стражи Галактики", 1)
+                    ("Акацуки", 0),
+                    ("Убийцы Драконов", 0),
+                    ("Стражи Галактики", 0)
                 ])
                 await conn.commit()
 
@@ -246,8 +236,9 @@ async def cmd_start(message: types.Message):
                 if actual_inviter:
                     await cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (actual_inviter,))
                     if await cursor.fetchone():
+                        # Даем новичку 5 круток, а пригласившему +2 крутки за реферала[cite: 3]
                         await cursor.execute(
-                            "INSERT INTO users (user_id, rolls, books, rating, guild, invited_by) VALUES (?, 7, 5, 1000, 'Нет', ?)",
+                            "INSERT INTO users (user_id, rolls, books, rating, guild, invited_by) VALUES (?, 5, 5, 1000, 'Нет', ?)",
                             (user_id, actual_inviter)
                         )
                         await cursor.execute("UPDATE users SET referral_count = referral_count + 1, rolls = rolls + 2 WHERE user_id = ?", (actual_inviter,))
@@ -290,12 +281,12 @@ async def show_profile(callback: types.CallbackQuery):
     text = (
         f"👤 **Ваш профиль:**\n\n"
         f"🎫 Крутки: `{rolls}`\n"
-        f"📚 Книги: `{books}`\n"
+        f"📚 Книги (баффы): `{books}`\n"
         f"🏆 Рейтинг: `{rating}`\n"
         f"🏰 Гильдия: `{guild}`\n"
         f"📦 Карток в инвентаре: `{inv_count}`\n"
         f"👥 Приглашено друзей: `{ref_count}`\n\n"
-        f"📈 **Бонусы статов:** Атака +{atk} | Защита +{defs} | Мана +{mana}"
+        f"📈 **Бонусы статов (Книги/Донат):** Атака +{atk} | Защита +{defs} | Мана +{mana}"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="action_main_menu")]])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -316,9 +307,9 @@ async def referral_menu(callback: types.CallbackQuery):
         "🤝 **Реферальная программа**\n\n"
         "Зовите друзей и получайте крутки!\n"
         "• За друга: +2 крутки 🎫\n"
-        "• Другу бонус: +7 круток 🎁\n\n"
-        f"👥 Приглашено: `{ref_count}`\n\n"
-        f"🔗 Ссылка:\n`{ref_link}`"
+        "• Новому игроку: 5 круток + 5 книг 🎁\n\n"
+        f"👥 Приглашено друзей: `{ref_count}`\n\n"
+        f"🔗 Ваша ссылка:\n`{ref_link}`"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="action_main_menu")]])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -336,13 +327,11 @@ async def process_roll(callback: types.CallbackQuery):
             rolls = row[0] if row else 0
 
             if rolls < 1:
-                await callback.answer("❌ У вас закончились крутки! Участвуйте в заданиях или ждите.", show_alert=True)
+                await callback.answer("❌ У вас закончились крутки! Используйте задания или пополните баланс.", show_alert=True)
                 return
 
-            # Списываем крутку
             await cursor.execute("UPDATE users SET rolls = rolls - 1 WHERE user_id = ?", (user_id,))
 
-            # Выбираем случайного персонажа
             await cursor.execute("SELECT name, universe, tier, class FROM characters")
             chars = await cursor.fetchall()
             if not chars:
@@ -352,7 +341,6 @@ async def process_roll(callback: types.CallbackQuery):
             chosen = random.choice(chars)
             name, universe, tier, c_class = chosen
 
-            # Добавляем в инвентарь (карточка остается навсегда)
             atk = random.randint(30, 90)
             def_val = random.randint(20, 70)
             hp = random.randint(100, 300)
@@ -374,14 +362,13 @@ async def process_roll(callback: types.CallbackQuery):
         f"🎴 **{name}** (`{tier}`)\n"
         f"🌌 Вселенная: {universe}\n"
         f"⚔️ Атака: {atk} | 🛡 Защита: {def_val}\n"
-        f"❤️ HP: {hp} | 💧 Мана: {mana}\n\n"
-        "💡 *Персонаж успешно добавлен в ваш инвентарь!*"
+        f"❤️ HP: {hp} | 💧 Мана: {mana}"
     )
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 
-# ==================== СИСТЕМА ГИЛЬДИЙ ====================
+# ==================== СИСТЕМА ГИЛЬДИЙ (ВХОД / ВЫХОД) ====================
 @dp.callback_query(F.data == "action_guilds")
 async def show_guilds_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -398,12 +385,12 @@ async def show_guilds_menu(callback: types.CallbackQuery):
     if user_guild != 'Нет':
         text = f"🏰 **Ваша гильдия:** `{user_guild}`\n\nДоступные функции:"
         keyboard_builder.append([InlineKeyboardButton(text="🐉 Гильд-босс (Рейд)", callback_data="action_guild_boss")])
+        keyboard_builder.append([InlineKeyboardButton(text="🚪 Покинуть гильдию", callback_data="leave_guild")])
     else:
         text = "🏰 **Список гильдий**\n\nВыберите гильдию для вступления:"
-
-    if guilds:
-        for g_name, count in guilds:
-            keyboard_builder.append([InlineKeyboardButton(text=f"🛡 {g_name} ({count} уч.)", callback_data=f"join_guild_{g_name}")])
+        if guilds:
+            for g_name, count in guilds:
+                keyboard_builder.append([InlineKeyboardButton(text=f"🛡 {g_name} ({count} уч.)", callback_data=f"join_guild_{g_name}")])
 
     keyboard_builder.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")])
     
@@ -421,27 +408,37 @@ async def process_join_guild(callback: types.CallbackQuery):
             user_row = await cursor.fetchone()
             
             if user_row and user_row[0] and user_row[0] != 'Нет':
-                if user_row[0] == guild_name:
-                    await callback.answer("⚠️ Вы уже в этой гильдии!", show_alert=True)
-                else:
-                    await callback.answer(f"❌ Вы уже состоите в гильдии '{user_row[0]}'.", show_alert=True)
-                return
-            
-            await cursor.execute("SELECT guild_name FROM guilds WHERE guild_name = ?", (guild_name,))
-            if not await cursor.fetchone():
-                await callback.answer("❌ Такой гильдии не существует.", show_alert=True)
+                await callback.answer(f"❌ Вы уже состоите в гильдии '{user_row[0]}'. Сначала покиньте её.", show_alert=True)
                 return
             
             await cursor.execute("UPDATE users SET guild = ? WHERE user_id = ?", (guild_name, user_id))
             await cursor.execute("UPDATE guilds SET members_count = members_count + 1 WHERE guild_name = ?", (guild_name,))
             await conn.commit()
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🏰 К гильдиям", callback_data="action_guilds")]])
-    await callback.message.edit_text(f"✅ Вы успешно вступили в гильдию **{guild_name}**!", reply_markup=kb, parse_mode="Markdown")
-    await callback.answer()
+    await callback.answer(f"✅ Вы успешно вступили в гильдию **{guild_name}**!", show_alert=True)
+    await show_guilds_menu(callback)
+
+@dp.callback_query(F.data == "leave_guild")
+async def process_leave_guild(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT guild FROM users WHERE user_id = ?", (user_id,))
+            user_row = await cursor.fetchone()
+            if not user_row or user_row[0] == 'Нет':
+                await callback.answer("❌ Вы нигде не состоите.", show_alert=True)
+                return
+            
+            old_guild = user_row[0]
+            await cursor.execute("UPDATE users SET guild = 'Нет' WHERE user_id = ?", (user_id,))
+            await cursor.execute("UPDATE guilds SET members_count = MAX(0, members_count - 1) WHERE guild_name = ?", (old_guild,))
+            await conn.commit()
+
+    await callback.answer(f"🚪 Вы покинули гильдию '{old_guild}'.", show_alert=True)
+    await show_guilds_menu(callback)
 
 
-# ==================== ЦЕНТР ЗАДАНИЙ И НАГРАД ====================
+# ==================== ЦЕНТР ЗАДАНИЙ (МАКСИМУМ ПО 1-2 КРУТКИ, 1 КВЕСТ НА КНИГИ) ====================
 @dp.callback_query(F.data == "action_quests")
 async def show_quests_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -464,22 +461,22 @@ async def show_quests_menu(callback: types.CallbackQuery):
             await cursor.execute("SELECT COUNT(*) FROM inventory WHERE user_id = ?", (user_id,))
             rolls_done = (await cursor.fetchone())[0]
 
-    daily_status = "🎁 Получить (+3)" if can_claim_daily else "⏳ Через 24ч"
+    daily_status = "🎁 Получить (+1 крутка)" if can_claim_daily else "⏳ Через 24ч"
     ref_status = " ✅" if ref_count >= 1 or "invite_friend" in completed else f" ({ref_count}/1)"
-    gacha_status = " ✅" if rolls_done >= 5 or "gacha_5" in completed else f" ({rolls_done}/5)"
+    gacha_status = " ✅" if rolls_done >= 3 or "gacha_3" in completed else f" ({rolls_done}/3)"
+    books_status = " ✅" if "books_farm_q" in completed else ""
     
     kb = [
-        [InlineKeyboardButton(text=f"📅 Ежедневная награда: {daily_status}", callback_data="claim_daily")],
-        [InlineKeyboardButton(text=f"🤝 Пригласи друга (+2 крутки){ref_status}", callback_data="claim_q_invite")],
-        [InlineKeyboardButton(text=f"🎰 Сделай 5 круток гачи (+3 крутки){gacha_status}", callback_data="claim_q_gacha")],
-        [InlineKeyboardButton(text="🛡 Вступи в гильдию (+2 крутки)" + (" ✅" if "join_guild_q" in completed else ""), callback_data="claim_q_guild")],
-        [InlineKeyboardButton(text="🐉 Ударь гильд-босса (+2 крутки)" + (" ✅" if "boss_hit_q" in completed else ""), callback_data="claim_q_boss")],
+        [InlineKeyboardButton(text=f"📅 Ежедневный вход: {daily_status}", callback_data="claim_daily")],
+        [InlineKeyboardButton(text=f"🤝 Пригласи друга (+1 крутка){ref_status}", callback_data="claim_q_invite")],
+        [InlineKeyboardButton(text=f"🎰 Сделай 3 крутки гачи (+1 крутка){gacha_status}", callback_data="claim_q_gacha")],
+        [InlineKeyboardButton(text=f"📚 Изучи архивы 1 раз (+1 книга){books_status}", callback_data="claim_q_books")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
     ]
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Выполняйте активности, объединяйтесь с игроками и получайте ресурсы бесплатно, либо ждите обновления таймеров!"
+        "Заданий немного, они дают небольшие бонусы (+1 крутка/книга). Основные ресурсы получаются на старте, от рефералов или через донат!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -497,9 +494,9 @@ async def process_claim_daily(callback: types.CallbackQuery):
                 if now - datetime.fromisoformat(row[0]) < timedelta(hours=24):
                     await callback.answer("⏳ Награда еще не доступна!", show_alert=True)
                     return
-            await cursor.execute("UPDATE users SET rolls = rolls + 3, last_claim = ? WHERE user_id = ?", (now.isoformat(), user_id))
+            await cursor.execute("UPDATE users SET rolls = rolls + 1, last_claim = ? WHERE user_id = ?", (now.isoformat(), user_id))
             await conn.commit()
-    await callback.answer("🎁 Получено +3 крутки!", show_alert=True)
+    await callback.answer("🎁 Получено +1 крутка за вход!", show_alert=True)
     await show_quests_menu(callback)
 
 @dp.callback_query(F.data == "claim_q_invite")
@@ -509,7 +506,7 @@ async def quest_invite(callback: types.CallbackQuery):
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "invite_friend"))
             if await cursor.fetchone():
-                await callback.answer("⚠️ Награда за это задание уже получена!", show_alert=True)
+                await callback.answer("⚠️ Награда уже получена!", show_alert=True)
                 return
             
             await cursor.execute("SELECT referral_count FROM users WHERE user_id = ?", (user_id,))
@@ -519,10 +516,10 @@ async def quest_invite(callback: types.CallbackQuery):
                 return
             
             await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "invite_friend"))
-            await cursor.execute("UPDATE users SET rolls = rolls + 2 WHERE user_id = ?", (user_id,))
+            await cursor.execute("UPDATE users SET rolls = rolls + 1 WHERE user_id = ?", (user_id,))
             await conn.commit()
             
-    await callback.answer("🎉 Задание выполнено! Начислено +2 крутки!", show_alert=True)
+    await callback.answer("🎉 Начислено +1 крутка за реферала!", show_alert=True)
     await show_quests_menu(callback)
 
 @dp.callback_query(F.data == "claim_q_gacha")
@@ -530,79 +527,43 @@ async def quest_gacha(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "gacha_5"))
+            await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "gacha_3"))
             if await cursor.fetchone():
                 await callback.answer("⚠️ Награда уже получена!", show_alert=True)
                 return
             
             await cursor.execute("SELECT COUNT(*) FROM inventory WHERE user_id = ?", (user_id,))
             count = (await cursor.fetchone())[0]
-            if count < 5:
-                await callback.answer(f"❌ Нужно сделать минимум 5 круток (у вас: {count}/5).", show_alert=True)
+            if count < 3:
+                await callback.answer(f"❌ Нужно сделать минимум 3 крутки (у вас: {count}/3).", show_alert=True)
                 return
             
-            await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "gacha_5"))
-            await cursor.execute("UPDATE users SET rolls = rolls + 3 WHERE user_id = ?", (user_id,))
+            await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "gacha_3"))
+            await cursor.execute("UPDATE users SET rolls = rolls + 1 WHERE user_id = ?", (user_id,))
             await conn.commit()
             
-    await callback.answer("🎉 Отлично! Получено +3 крутки за активность в гаче!", show_alert=True)
+    await callback.answer("🎉 Получено +1 крутка за активность!", show_alert=True)
     await show_quests_menu(callback)
 
-@dp.callback_query(F.data == "claim_q_guild")
-async def quest_guild(callback: types.CallbackQuery):
+@dp.callback_query(F.data == "claim_q_books")
+async def quest_books(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "join_guild_q"))
+            await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "books_farm_q"))
             if await cursor.fetchone():
-                await callback.answer("⚠️ Награда уже получена!", show_alert=True)
+                await callback.answer("⚠️ Квест на книги уже выполнен!", show_alert=True)
                 return
             
-            await cursor.execute("SELECT guild FROM users WHERE user_id = ?", (user_id,))
-            row = await cursor.fetchone()
-            if not row or row[0] == 'Нет':
-                await callback.answer("❌ Сначала вступите в любую гильдию!", show_alert=True)
-                return
-            
-            await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "join_guild_q"))
-            await cursor.execute("UPDATE users SET rolls = rolls + 2 WHERE user_id = ?", (user_id,))
+            await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "books_farm_q"))
+            await cursor.execute("UPDATE users SET books = books + 1 WHERE user_id = ?", (user_id,))
             await conn.commit()
             
-    await callback.answer("🎉 Вы в гильдии! Начислено +2 крутки!", show_alert=True)
-    await show_quests_menu(callback)
-
-@dp.callback_query(F.data == "claim_q_boss")
-async def quest_boss_hit(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    async with aiosqlite.connect("gacha_bot.db") as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("SELECT 1 FROM user_quests WHERE user_id = ? AND quest_id = ?", (user_id, "boss_hit_q"))
-            if await cursor.fetchone():
-                await callback.answer("⚠️ Награда за этот квест уже получена!", show_alert=True)
-                return
-            
-            await cursor.execute("SELECT guild FROM users WHERE user_id = ?", (user_id,))
-            u_row = await cursor.fetchone()
-            guild_name = u_row[0] if u_row else 'Нет'
-            
-            if guild_name == 'Нет':
-                await callback.answer("❌ Вы не состоите в гильдии.", show_alert=True)
-                return
-                
-            await cursor.execute("SELECT 1 FROM guild_boss_hits WHERE user_id = ? AND guild_name = ?", (user_id, guild_name))
-            if not await cursor.fetchone():
-                await callback.answer("❌ Вы еще не ударили гильд-босса сегодня!", show_alert=True)
-                return
-            
-            await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "boss_hit_q"))
-            await cursor.execute("UPDATE users SET rolls = rolls + 2 WHERE user_id = ?", (user_id,))
-            await conn.commit()
-            
-    await callback.answer("🎉 Удар по боссу зачтен! Получено +2 крутки!", show_alert=True)
+    await callback.answer("🎉 Получена +1 книга за квест архивов!", show_alert=True)
     await show_quests_menu(callback)
 
 
-# ==================== СИСТЕМА 100+ ГИЛЬД-БОССОВ ====================
+# ==================== СИСТЕМА ГИЛЬД-БОССОВ (УЧИТЫВАЕТ БОНУСЫ КНИГ/ДОНАТА) ====================
 @dp.callback_query(F.data == "action_guild_boss")
 async def show_guild_boss_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -642,11 +603,11 @@ async def show_guild_boss_menu(callback: types.CallbackQuery):
             await cursor.execute("SELECT 1 FROM guild_boss_hits WHERE user_id = ? AND guild_name = ? AND hit_date = ?", (user_id, guild_name, today_str))
             already_hit = await cursor.fetchone() is not None
 
-    hit_btn_text = "⚔️ Нанести удар (+1)" if not already_hit else "⏳ Удар уже совершен"
+    hit_btn_text = "⚔️ Нанести удар" if not already_hit else "⏳ Удар уже совершен"
     
     kb = [
         [InlineKeyboardButton(text=hit_btn_text, callback_data="hit_guild_boss")],
-        [InlineKeyboardButton(text="◀️ К списку гильдий", callback_data="action_guilds")]
+        [InlineKeyboardButton(text="◀️ К гильдиям", callback_data="action_guilds")]
     ]
 
     text = (
@@ -655,7 +616,7 @@ async def show_guild_boss_menu(callback: types.CallbackQuery):
         f"Здоровье: `{boss_hp}/{max_hp}` HP\n"
         f"[{bars}] {percent}%\n\n"
         f"👥 Участники: **{killers_count} / {required_hits}**\n\n"
-        "💡 *Побеждайте боссов совместными силами и получайте по +2 крутки!*"
+        "💡 *Урон по боссу рассчитывается с учетом ваших бонусных статов от книг/доната!*"
     )
     if is_defeated:
         text += "\n\n🎉 **Босс повержен! Нажмите удар, чтобы призвать следующего!**"
@@ -683,6 +644,14 @@ async def process_hit_boss(callback: types.CallbackQuery):
                 await callback.answer("⏳ Вы уже атаковали сегодня!", show_alert=True)
                 return
             
+            # Подтягиваем донат-баффы от книг для расчета урона
+            await cursor.execute("SELECT extra_atk FROM user_upgrades WHERE user_id = ?", (user_id,))
+            up = await cursor.fetchone()
+            extra_atk = up[0] if up else 0
+
+            # Базовый урон + бонус от прокачанных книг/доната
+            damage = 15 + (extra_atk // 2)
+
             await cursor.execute("SELECT boss_hp, killers_count, is_defeated, boss_level, max_hp FROM guild_boss WHERE guild_name = ?", (guild_name,))
             boss_row = await cursor.fetchone()
             boss_hp, killers_count, is_defeated, boss_level, max_hp = boss_row
@@ -700,7 +669,6 @@ async def process_hit_boss(callback: types.CallbackQuery):
                 await show_guild_boss_menu(callback)
                 return
 
-            damage = 15
             new_hp = max(0, boss_hp - damage)
             new_killers = killers_count + 1
             
@@ -717,11 +685,11 @@ async def process_hit_boss(callback: types.CallbackQuery):
                 await cursor.execute("UPDATE guild_boss SET boss_hp = ?, killers_count = ? WHERE guild_name = ?", (new_hp, new_killers, guild_name))
                 await conn.commit()
 
-    await callback.answer(f"⚔️ Удар нанесен! (-{damage} HP)", show_alert=True)
+    await callback.answer(f"⚔️ Удар нанесен! (-{damage} HP с учетом баффов книг)", show_alert=True)
     await show_guild_boss_menu(callback)
 
 
-# ==================== БИБЛИОТЕКА И ПРОКАЧКА СТАТОВ ЗА КНИГИ ====================
+# ==================== БИБЛИОТЕКА И ДОНАТ-БАФФЫ ЗА КНИГИ ====================
 @dp.callback_query(F.data == "action_books_farm")
 async def show_books_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -736,7 +704,6 @@ async def show_books_menu(callback: types.CallbackQuery):
             atk, defs, mana = up if up else (0, 0, 0)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 Изучать архивы (Фарм книг)", callback_data="farm_books_action")],
         [InlineKeyboardButton(text="⚔️ Прокачать +5 Атаки (🧥 3 книги)", callback_data="upgrade_stat_atk")],
         [InlineKeyboardButton(text="🛡 Прокачать +5 Защиты (🧥 3 книги)", callback_data="upgrade_stat_def")],
         [InlineKeyboardButton(text="💧 Прокачать +5 Маны (🧥 3 книги)", callback_data="upgrade_stat_mana")],
@@ -744,23 +711,14 @@ async def show_books_menu(callback: types.CallbackQuery):
     ])
 
     text = (
-        "📖 **Библиотека и Академия Навыков**\n\n"
-        f"📚 Книги мудрости: `{books}` шт.\n\n"
-        f"📈 Улучшения: Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
+        "📖 **Библиотека и Донат-Баффы Аккаунта**\n\n"
+        "Используйте книги мудрости (полученные со старта, через донат или квесты) для перманентного усиления параметров вашего аккаунта.\n"
+        "⚙️ *Эти баффы полноценно учитываются в рейдах на боссов и на арене.*\n\n"
+        f"📚 Доступно книг: `{books}` шт.\n\n"
+        f"📈 Ваши баффы: Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
     )
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
-
-@dp.callback_query(F.data == "farm_books_action")
-async def process_farm_books(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    found = random.randint(1, 3)
-    async with aiosqlite.connect("gacha_bot.db") as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("UPDATE users SET books = books + ? WHERE user_id = ?", (found, user_id))
-            await conn.commit()
-    await callback.answer(f"📚 Найдено книг: +{found}!", show_alert=True)
-    await show_books_menu(callback)
 
 async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, stat_name: str):
     user_id = callback.from_user.id
@@ -772,10 +730,12 @@ async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, sta
             books = row[0] if row else 0
 
             if books < cost:
-                await callback.answer(f"❌ Нужно минимум {cost} книги!", show_alert=True)
+                await callback.answer(f"❌ Нужно минимум {cost} книги для улучшения!", show_alert=True)
                 return
 
+            # Списываем книги у игрока
             await cursor.execute("UPDATE users SET books = books - ? WHERE user_id = ?", (cost, user_id))
+            
             await cursor.execute("SELECT 1 FROM user_upgrades WHERE user_id = ?", (user_id,))
             if not await cursor.fetchone():
                 await cursor.execute("INSERT INTO user_upgrades (user_id, extra_atk, extra_def, extra_mana) VALUES (?, 0, 0, 0)", (user_id,))
@@ -783,7 +743,7 @@ async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, sta
             await cursor.execute(f"UPDATE user_upgrades SET {stat_column} = {stat_column} + 5 WHERE user_id = ?", (user_id,))
             await conn.commit()
 
-    await callback.answer(f"🎉 {stat_name} увеличена на +5!", show_alert=True)
+    await callback.answer(f"🎉 Успешно! {stat_name} увеличена на +5 (книги списаны).", show_alert=True)
     await show_books_menu(callback)
 
 @dp.callback_query(F.data == "upgrade_stat_atk")
@@ -802,7 +762,7 @@ async def handle_up_def(callback: types.CallbackQuery):
 # ==================== ЗАПУСК БОТА ====================
 async def main():
     await init_db()
-    # Сбрасываем старые зависшие сессии при каждом новом запуске
+    # Сбрасываем зависшие соединения во избежание TelegramConflictError
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
