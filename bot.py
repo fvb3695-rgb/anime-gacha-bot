@@ -127,87 +127,86 @@ SS_CARDS_POOL = [
 ]
 
 # ==================== БАЗА ДАННЫХ ====================
-def init_db():
-    conn = sqlite3.connect("gacha_bot.db")
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            rolls INTEGER DEFAULT 5,
-            books INTEGER DEFAULT 5,
-            rating INTEGER DEFAULT 1000,
-            guild TEXT DEFAULT 'Нет',
-            invited_by INTEGER DEFAULT NULL,
-            referral_count INTEGER DEFAULT 0
-        )
-    """)
-    
-    # Безопасное добавление реферальных колонок для уже существующих баз данных
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN invited_by INTEGER")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN referral_count INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            character_name TEXT,
-            universe TEXT,
-            tier TEXT,
-            atk INTEGER,
-            def INTEGER,
-            hp INTEGER,
-            mana INTEGER
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS characters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            universe TEXT,
-            tier TEXT,
-            class TEXT
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS guilds (
-            guild_name TEXT PRIMARY KEY,
-            leader_id INTEGER,
-            members_count INTEGER DEFAULT 1
-        )
-    """)
+import aiosqlite
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pvp_deck (
-            user_id INTEGER,
-            card_id INTEGER
-        )
-    """)
-    
-    cursor.execute("SELECT COUNT(*) FROM characters")
-    if cursor.fetchone()[0] == 0:
-        all_to_insert = []
-        for c in ICARDS_POOL:
-            all_to_insert.append((c["name"], c["anime"], c["rarity"], c["class"]))
-        for c in SS_CARDS_POOL:
-            all_to_insert.append((c["name"], c["anime"], c["rarity"], c["class"]))
+async def init_db():
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    rolls INTEGER DEFAULT 5,
+                    books INTEGER DEFAULT 5,
+                    rating INTEGER DEFAULT 1000,
+                    guild TEXT DEFAULT 'Нет',
+                    invited_by INTEGER DEFAULT NULL,
+                    referral_count INTEGER DEFAULT 0
+                )
+            """)
             
-        cursor.executemany("INSERT INTO characters (name, universe, tier, class) VALUES (?, ?, ?, ?)", all_to_insert)
-        conn.commit()
-        
-    conn.commit()
-    conn.close()
+            # Безопасное добавление колонок для старой базы
+            try:
+                await cursor.execute("ALTER TABLE users ADD COLUMN invited_by INTEGER")
+            except Exception:
+                pass
+                
+            try:
+                await cursor.execute("ALTER TABLE users ADD COLUMN referral_count INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inventory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    character_name TEXT,
+                    universe TEXT,
+                    tier TEXT,
+                    atk INTEGER,
+                    def INTEGER,
+                    hp INTEGER,
+                    mana INTEGER
+                )
+            """)
+            
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS characters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    universe TEXT,
+                    tier TEXT,
+                    class TEXT
+                )
+            """)
+            
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS guilds (
+                    guild_name TEXT PRIMARY KEY,
+                    leader_id INTEGER,
+                    members_count INTEGER DEFAULT 1
+                )
+            """)
 
-init_db()
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pvp_deck (
+                    user_id INTEGER,
+                    card_id INTEGER
+                )
+            """)
+            
+            await cursor.execute("SELECT COUNT(*) FROM characters")
+            row = await cursor.fetchone()
+            if row and row[0] == 0:
+                all_to_insert = []
+                for c in ICARDS_POOL:
+                    all_to_insert.append((c["name"], c["anime"], c["rarity"], c["class"]))
+                for c in SS_CARDS_POOL:
+                    all_to_insert.append((c["name"], c["anime"], c["rarity"], c["class"]))
+                    
+                await cursor.executemany("INSERT INTO characters (name, universe, tier, class) VALUES (?, ?, ?, ?)", all_to_insert)
+                await conn.commit()
+                
+        await conn.commit()
 
 # ==================== КНОПКИ МЕНЮ ====================
 def get_main_keyboard(is_admin: bool = False):
