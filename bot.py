@@ -212,10 +212,6 @@ def get_main_keyboard(is_admin: bool = False):
         [
             InlineKeyboardButton(text="🛡 Гильдии", callback_data="action_guild_menu"),
             InlineKeyboardButton(text="💎 Магазин (Stars)", callback_data="action_shop")
-        ]
-        [
-            InlineKeyboardButton(text="🛡 Гильдии", callback_data="action_guild_menu"),
-            InlineKeyboardButton(text="💎 Магазин (Stars)", callback_data="action_shop"),
         ],
         [
             InlineKeyboardButton(text="🤝 Партнерская программа", callback_data="action_referral"),
