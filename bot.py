@@ -84,6 +84,7 @@ def get_boss_info(level: int):
 async def init_db():
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
+            # Создаем базовую таблицу, если её совсем нет
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -99,12 +100,26 @@ async def init_db():
                 )
             """)
             
-            for col, col_type in [("is_donator", "INTEGER DEFAULT 0"), ("nickname", "TEXT DEFAULT NULL"), ("rolls", "INTEGER DEFAULT 5")]:
-                try:
-                    await cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
-                except Exception:
-                    pass
+            # Безопасно добавляем каждую колонку по отдельности, если база уже существовала
+            columns_to_check = [
+                ("nickname", "TEXT DEFAULT NULL"),
+                ("rolls", "INTEGER DEFAULT 5"),
+                ("books", "INTEGER DEFAULT 5"),
+                ("rating", "INTEGER DEFAULT 1000"),
+                ("guild", "TEXT DEFAULT 'Нет'"),
+                ("invited_by", "INTEGER DEFAULT NULL"),
+                ("referral_count", "INTEGER DEFAULT 0"),
+                ("last_claim", "TEXT"),
+                ("is_donator", "INTEGER DEFAULT 0")
+            ]
             
+            for col_name, col_type in columns_to_check:
+                try:
+                    await cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+                except Exception:
+                    pass # Колонка уже существует, идем дальше
+            
+            # Остальные таблицы (inventory, characters, guilds и т.д.)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS inventory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
