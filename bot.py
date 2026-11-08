@@ -910,22 +910,6 @@ async def process_add_card_to_deck(callback: types.CallbackQuery):
     except Exception:
         pass
 # ==================== ПАРТНЕРСКАЯ ПРОГРАММА ====================
-@dp.message(F.text == "🤝 Партнерская программа")
-async def referral_menu(message: types.Message):
-    user_id = message.from_user.id
-    bot_info = await bot.get_me()
-    
-    conn = sqlite3.connect("gacha_bot.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT referral_count FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    ref_count = row[0] if row and row[0] is not None else 0
-    ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
-    
-    text = (
-      # ==================== ПАРТНЕРСКАЯ ПРОГРАММА ====================
 @dp.callback_query(F.data == "action_referral")
 async def referral_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
