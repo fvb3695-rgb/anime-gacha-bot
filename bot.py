@@ -649,7 +649,7 @@ async def preview_bot_fight(callback: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ СРАЗИТЬСЯ С БОТОМ!", callback_data=f"exec_bot_{bot_rating}_{bot_name.replace(' ', '_')}"),
         [InlineKeyboardButton(text="◀️ Назад на арену", callback_data="action_arena")]
-    ])
+    ]
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
