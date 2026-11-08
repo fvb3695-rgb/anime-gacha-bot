@@ -179,6 +179,16 @@ async def init_db():
                 )
             """)
             
+            # Создаем стандартные гильдии для теста, если их нет
+            await cursor.execute("SELECT COUNT(*) FROM guilds")
+            if (await cursor.fetchone())[0] == 0:
+                await cursor.executemany("INSERT INTO guilds (guild_name, members_count) VALUES (?, ?)", [
+                    ("Акацуки", 1),
+                    ("Убийцы Драконов", 1),
+                    ("Стражи Галактики", 1)
+                ])
+                await conn.commit()
+
             await cursor.execute("SELECT COUNT(*) FROM characters")
             row = await cursor.fetchone()
             if row and row[0] == 0:
@@ -311,6 +321,62 @@ async def referral_menu(callback: types.CallbackQuery):
     await callback.answer()
 
 
+# ==================== СИСТЕМА ГАЧИ ====================
+@dp.callback_query(F.data == "action_roll")
+async def process_roll(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect("gacha_bot.db") as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT rolls FROM users WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            rolls = row[0] if row else 0
+
+            if rolls < 1:
+                await callback.answer("❌ У вас закончились крутки! Участвуйте в заданиях или ждите.", show_alert=True)
+                return
+
+            # Списываем крутку
+            await cursor.execute("UPDATE users SET rolls = rolls - 1 WHERE user_id = ?", (user_id,))
+
+            # Выбираем случайного персонажа
+            await cursor.execute("SELECT name, universe, tier, class FROM characters")
+            chars = await cursor.fetchall()
+            if not chars:
+                await callback.answer("⚠️ Ошибка: база персонажей пуста.", show_alert=True)
+                return
+
+            chosen = random.choice(chars)
+            name, universe, tier, c_class = chosen
+
+            # Добавляем в инвентарь (карточка остается навсегда)
+            atk = random.randint(30, 90)
+            def_val = random.randint(20, 70)
+            hp = random.randint(100, 300)
+            mana = random.randint(50, 150)
+
+            await cursor.execute(
+                "INSERT INTO inventory (user_id, character_name, universe, tier, atk, def, hp, mana) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, name, universe, tier, atk, def_val, hp, mana)
+            )
+            await conn.commit()
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎰 Крутить еще", callback_data="action_roll")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
+    ])
+
+    text = (
+        "✨ **Вы совершили призыв!** ✨\n\n"
+        f"🎴 **{name}** (`{tier}`)\n"
+        f"🌌 Вселенная: {universe}\n"
+        f"⚔️ Атака: {atk} | 🛡 Защита: {def_val}\n"
+        f"❤️ HP: {hp} | 💧 Мана: {mana}\n\n"
+        "💡 *Персонаж успешно добавлен в ваш инвентарь!*"
+    )
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+
 # ==================== СИСТЕМА ГИЛЬДИЙ ====================
 @dp.callback_query(F.data == "action_guilds")
 async def show_guilds_menu(callback: types.CallbackQuery):
@@ -402,7 +468,6 @@ async def show_quests_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text=f"📅 Ежедневная награда: {daily_status}", callback_data="claim_daily")],
         [InlineKeyboardButton(text=f"🤝 Пригласи друга (+2 крутки){ref_status}", callback_data="claim_q_invite")],
         [InlineKeyboardButton(text=f"🎰 Сделай 5 круток гачи (+3 крутки){gacha_status}", callback_data="claim_q_gacha")],
-        [InlineKeyboardButton(text="📚 Изучи архивы 3 раза (+2 книги)" + (" ✅" if "books_3" in completed else ""), callback_data="claim_q_books")],
         [InlineKeyboardButton(text="🛡 Вступи в гильдию (+2 крутки)" + (" ✅" if "join_guild_q" in completed else ""), callback_data="claim_q_guild")],
         [InlineKeyboardButton(text="🐉 Ударь гильд-босса (+2 крутки)" + (" ✅" if "boss_hit_q" in completed else ""), callback_data="claim_q_boss")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
@@ -410,8 +475,7 @@ async def show_quests_menu(callback: types.CallbackQuery):
 
     text = (
         "🎯 **Центр Заданий и Наград**\n\n"
-        "Выполняйте активности, объединяйтесь с игроками и получайте ресурсы бесплатно, либо ждите обновления таймеров!\n\n"
-        "💡 *Хотите всё и сразу? Поддержите проект донатом или ускорьте прогресс друзей.*"
+        "Выполняйте активности, объединяйтесь с игроками и получайте ресурсы бесплатно, либо ждите обновления таймеров!"
     )
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
@@ -447,7 +511,7 @@ async def quest_invite(callback: types.CallbackQuery):
             await cursor.execute("SELECT referral_count FROM users WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
             if not row or row[0] < 1:
-                await callback.answer("❌ Вы еще никого не пригласили! Ссылка в разделе 'Рефералы'.", show_alert=True)
+                await callback.answer("❌ Вы еще никого не пригласили!", show_alert=True)
                 return
             
             await cursor.execute("INSERT INTO user_quests (user_id, quest_id) VALUES (?, ?)", (user_id, "invite_friend"))
@@ -736,9 +800,6 @@ async def main():
     await init_db()
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
