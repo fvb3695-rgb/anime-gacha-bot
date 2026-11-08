@@ -932,16 +932,16 @@ async def referral_menu(callback: types.CallbackQuery):
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
     text = (
-        f"🤝 **Партнерская программа**\n\n"
-        f"Зовите друзей в гачу и получайте крутки для призыва!\n"
-        f"• За каждого друга: **+2 крутки** 🎫\n"
-        f"• Друг тоже получает бонус: **+7 круток** 🎁\n\n"
-        f"👥 Приглашено друзей: **{ref_count}**\n\n"
-        f"🔗 Ваша реферальная ссылка:\n"
+        "🤝 Партнерская программа\n\n"
+        "Зовите друзей в гачу и получайте крутки для призыва!\n"
+        "• За каждого друга: +2 крутки 🎫\n"
+        "• Друг тоже получает бонус: +7 круток 🎁\n\n"
+        f"👥 Приглашено друзей: {ref_count}\n\n"
+        "🔗 Ваша реферальная ссылка:\n"
         f"{ref_link}"
     )
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.message.edit_text(text)
     await callback.answer()
 
 # ==================== ЗАПУСК БОТА ====================
