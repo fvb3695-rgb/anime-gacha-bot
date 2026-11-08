@@ -143,6 +143,17 @@ def init_db():
         )
     """)
     
+    # Безопасное добавление реферальных колонок для уже существующих баз данных
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN invited_by INTEGER")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN referral_count INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
