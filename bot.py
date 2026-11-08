@@ -36,6 +36,9 @@ TOKEN = "9049422974:AAG5svkRpLtL0-OXX6MikuEKNiJHHsEFoao"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Твой ID разработчика для секретной кнопки
+DEV_ID = 533162381
+
 # Пулы персонажей с рангами S, A, B, C, D
 ICARDS_POOL = [
     {"name": "Наруто Узумаки", "anime": "Naruto", "rarity": "S", "class": "Боец"},
@@ -640,12 +643,10 @@ async def preview_bot_fight(callback: types.CallbackQuery):
         f"• Элитный босс арены (Сила соразмерна рейтингу `{bot_rating}` PTS)\n\n"
         f"👇 *Нажмите кнопку ниже, чтобы начать схватку!*"
     )
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ СРАЗИТЬСЯ С БОТОМ!", callback_data=f"exec_bot_{bot_rating}_{bot_name.replace(' ', '_')}")],
         [InlineKeyboardButton(text="◀️ Назад на арену", callback_data="action_arena")]
     ])
-    
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
@@ -825,7 +826,7 @@ async def successful_payment_handler(message: types.Message):
                 await cursor.execute("UPDATE users SET rolls = rolls + 15 WHERE user_id = ?", (user_id,))
                 r_text = "+15 круток 🎫"
             elif payload == "payload_books_10":
-                await cursor.execute("UPDATE users SET books = books + 10 WHERE user_id = ?", (user_id,))
+                await cursor.execute("UPDATE users `SET books` = books + 10 WHERE user_id = ?", (user_id,))
                 r_text = "+10 книг 📚"
             await conn.commit()
     await message.answer(f"🎉 **Оплата прошла успешно!** Статус ⭐ **VIP-Донатер** активирован, {r_text}", parse_mode="Markdown")
@@ -1014,7 +1015,6 @@ async def process_kick_member(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "action_quests")
 async def show_quests_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    DEV_ID = 533162381  # Твой Telegram ID
     
     async with aiosqlite.connect("gacha_bot.db") as conn:
         async with conn.cursor() as cursor:
@@ -1057,7 +1057,6 @@ async def process_claim_daily(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "dev_cheat_resources")
 async def process_dev_cheat(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    DEV_ID = 533162381
     
     if user_id != DEV_ID:
         await callback.answer("❌ У вас нет прав!", show_alert=True)
@@ -1190,7 +1189,7 @@ async def show_books_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="action_main_menu")]
     ])
     text = f"📖 **Библиотека Баффов**\n\n📚 Доступно книг: `{books}` шт.\n\n📈 Атака `+{atk}` | Защита `+{defs}` | Мана `+{mana}`"
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.message.edit_text(text, reply_kb=kb, parse_mode="Markdown") # заменено reply_kb на reply_markup ниже
     await callback.answer()
 
 async def upgrade_user_stat(callback: types.CallbackQuery, stat_column: str, stat_name: str):
@@ -1214,7 +1213,7 @@ async def handle_up_atk(callback: types.CallbackQuery): await upgrade_user_stat(
 @dp.callback_query(F.data == "upgrade_stat_mana")
 async def handle_up_mana(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_mana", "Мана")
 @dp.callback_query(F.data == "upgrade_stat_def")
-async def handle_up_def(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_def", "Защита")
+async def handle_up_def(callback: types.CallbackQuery): await upgrade_user_stat(callback, "extra_defs", "Защита")
 
 
 # ==================== ЗАПУСК БОТА ====================
@@ -1223,6 +1222,9 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
