@@ -131,13 +131,15 @@ def init_db():
     conn = sqlite3.connect("gacha_bot.db")
     cursor = conn.cursor()
     
-    cursor.execute("""
+   cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             rolls INTEGER DEFAULT 5,
             books INTEGER DEFAULT 5,
             rating INTEGER DEFAULT 1000,
-            guild TEXT DEFAULT 'Нет'
+            guild TEXT DEFAULT 'Нет',
+            invited_by INTEGER DEFAULT NULL,
+            referral_count INTEGER DEFAULT 0
         )
     """)
     
@@ -229,15 +231,59 @@ def get_back_keyboard(is_admin: bool = False):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    
+    # Ловим аргумент после /start (например, ref123456)
+    args = message.text.split(maxsplit=1)
+    referrer_id = None
+    if len(args) > 1 and args[1].startswith("ref"):
+        try:
+            referrer_id = int(args[1].replace("ref", ""))
+        except ValueError:
+            pass
+
     conn = sqlite3.connect("gacha_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
-    
+
     if not user:
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
-        conn.commit()
+        if referrer_id and referrer_id != user_id:
+            cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (referrer_id,))
+            if cursor.fetchone():
+                # Новичку даем бонусные крутки при регистрации по рефке (7 вместо дефолтных 5)
+                cursor.execute(
+                    "INSERT INTO users (user_id, rolls, invited_by) VALUES (?, 7, ?)",
+                    (user_id, referrer_id)
+                )
+                # Пригласившему начисляем +2 крутки и увеличиваем счетчик рефералов
+                cursor.execute(
+                    "UPDATE users SET rolls = rolls + 2, referral_count = referral_count + 1 WHERE user_id = ?",
+                    (referrer_id,)
+                )
+                conn.commit()
+                # Уведомляем пригласившего
+                try:
+                    await bot.send_message(
+                        referrer_id, 
+                        "🎉 По вашей реферальной ссылке зарегистрировался новый игрок!\n🎁 Вам начислено **+2 крутки** 🎫"
+                    )
+                except Exception:
+                    pass
+            else:
+                cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+                conn.commit()
+        else:
+            cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+            conn.commit()
+
     conn.close()
+
+    is_admin = (user_id == ADMIN_ID)
+    text = (
+        "🤖 **Добро пожаловать в Аниме-Гача ТГ-Бот!**\n\n"
+        "Выбирай нужный раздел кнопками ниже:"
+    )
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(is_admin))
 
     is_admin = (user_id == ADMIN_ID)
     text = (
@@ -856,6 +902,31 @@ async def process_add_card_to_deck(callback: types.CallbackQuery):
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     except Exception:
         pass
+# ==================== ПАРТНЕРСКАЯ ПРОГРАММА ====================
+@dp.message(F.text == "🤝 Партнерская программа")
+async def referral_menu(message: types.Message):
+    user_id = message.from_user.id
+    bot_info = await bot.get_me()
+    
+    conn = sqlite3.connect("gacha_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT referral_count FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    ref_count = row[0] if row and row[0] is not None else 0
+    ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
+    
+    text = (
+        f"🤝 **Партнерская программа**\n\n"
+        f"Зовите друзей в гачу и получайте крутки для призыва!\n"
+        f"• За каждого друга: **+2 крутки** 🎫\n"
+        f"• Друг тоже получает бонус: **+7 круток** 🎁\n\n"
+        f"👥 Приглашено друзей: **{ref_count}**\n\n"
+        f"🔗 Ваша реферальная ссылка:\n`{ref_link}`"
+    )
+    
+    await message.answer(text, parse_mode="Markdown")
 
 # ==================== ЗАПУСК БОТА ====================
 async def main():
