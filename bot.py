@@ -29,7 +29,7 @@ threading.Thread(target=run_server, daemon=True).start()
 # ==================== НАСТРОЙКИ И ИНИЦИАЛИЗАЦИЯ ====================
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = os.environ.get("BOT_TOKEN", "ТВОЙ_ТОКЕН_БОТА") # Укажи свой токен или используй переменную окружения на Render
+TOKEN = "9049422974:AAG5svkRpLtL0-OXX6MikuEKNiJHHsEFoao"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -94,7 +94,6 @@ async def init_db():
                 )
             """)
             
-            # Безопасное добавление недостающих колонок для существующих таблиц
             for col, col_type in [("invited_by", "INTEGER"), ("referral_count", "INTEGER DEFAULT 0"), ("last_claim", "TEXT")]:
                 try:
                     await cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -180,7 +179,6 @@ async def init_db():
                 )
             """)
             
-            # Заполняем пул персонажей, если он пуст
             await cursor.execute("SELECT COUNT(*) FROM characters")
             row = await cursor.fetchone()
             if row and row[0] == 0:
@@ -738,6 +736,9 @@ async def main():
     await init_db()
     logging.info("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
