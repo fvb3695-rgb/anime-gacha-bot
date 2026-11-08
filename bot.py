@@ -213,6 +213,13 @@ def get_main_keyboard(is_admin: bool = False):
             InlineKeyboardButton(text="🛡 Гильдии", callback_data="action_guild_menu"),
             InlineKeyboardButton(text="💎 Магазин (Stars)", callback_data="action_shop")
         ]
+        [
+            InlineKeyboardButton(text="🛡 Гильдии", callback_data="action_guild_menu"),
+            InlineKeyboardButton(text="💎 Магазин (Stars)", callback_data="action_shop"),
+        ],
+        [
+            InlineKeyboardButton(text="🤝 Партнерская программа", callback_data="action_referral"),
+        ]
     ]
     if is_admin:
         keyboard.append([InlineKeyboardButton(text="⚡️ [Админ] +50 круток", callback_data="admin_add_rolls")])
@@ -918,6 +925,22 @@ async def referral_menu(message: types.Message):
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
     text = (
+      # ==================== ПАРТНЕРСКАЯ ПРОГРАММА ====================
+@dp.callback_query(F.data == "action_referral")
+async def referral_menu(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    bot_info = await bot.get_me()
+    
+    conn = sqlite3.connect("gacha_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT referral_count FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    ref_count = row[0] if row and row[0] is not None else 0
+    ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
+    
+    text = (
         f"🤝 **Партнерская программа**\n\n"
         f"Зовите друзей в гачу и получайте крутки для призыва!\n"
         f"• За каждого друга: **+2 крутки** 🎫\n"
@@ -926,7 +949,8 @@ async def referral_menu(message: types.Message):
         f"🔗 Ваша реферальная ссылка:\n`{ref_link}`"
     )
     
-    await message.answer(text, parse_mode="Markdown")
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.answer()
 
 # ==================== ЗАПУСК БОТА ====================
 async def main():
